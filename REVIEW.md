@@ -1,240 +1,182 @@
-# REVIEW — spec 03, assessment interview
+# REVIEW — spec 04, activity selection and focus
 
-Spec: `docs/specs/03-assessment-interview.md`. Tag `spec-03`. Built 2026-09-06.
+Spec: `docs/specs/04-activity-selection.md` (PRD §1.5–1.7). All six scope items
+built. Tag `spec-04`.
 
-All six scope items are done. This session ran straight through without the
-per-item checkpoint that CLAUDE.md normally requires, because the session prompt
-explicitly asked for that ("Run straight through without stopping for approval").
+This spec was re-drafted before it was built. The original one-page sketch
+`04-activities-and-focus.md` predated specs 01–03; item 6 retired it and fixed
+the two references. Nothing in the sketch was dropped.
 
 ---
 
 ## What was built
 
-### 1. Assessment catalogue — `lib/assessments/catalogue.ts`
-Directive-free module (both the client UI and the server scorer import it). Four
-inventories, 43 items in total, every item written for gazelle:
+**1. Schema (`supabase/migrations/0006_activity_kind_and_focus.sql`).**
+A Postgres enum `activity_kind` (`recurring_community` | `one_off_source`) and
+`activities.kind`, because PRD §1.6 treats the two differently and nothing in
+the table said which an activity was. `activities.fit_score` (smallint, 0–100,
+check-constrained, nullable) for the model's persona-fit score. `profiles.
+focus_cap` (smallint, 2–4, default 3) because PRD §1.7's cap is a number the
+user can change. Applied to `wqawpwbgrsjusbdopgbi` and verified against
+`information_schema`. Zod updated to match, and `tests/schemas.test.ts` holds
+the schemas against the migration SQL as before.
 
-| id | name | scales | items |
-|----|------|--------|-------|
-| `behavioural_profile` | Behavioural profile | Drive, Influence, Steadiness, Precision | 12 |
-| `big_five` | Short Big Five | Openness, Conscientiousness, Extraversion, Agreeableness, Emotional stability | 10 |
-| `core_motivations` | Core motivations | nine motivational drives | 9 |
-| `social_style` | Social style | Outward, Organiser, Joiner | 12 |
+**2. `activity_suggestion`, real prompt (`lib/llm/components/activity-suggestion.ts`).**
+The spec 02 stub is gone. Input widened from three fields to six: traits, the
+persona's own `desired_activities` with their rationale, every existing
+activity whatever its status, and the five constraint answers. Output gains
+`kind` and `fit_score`; `supports_goal` must quote a goal it was given. Capped
+at 8 suggestions.
 
-Every item is a 1–5 agreement rating, so one widget serves all four. Reverse-keyed
-items are scored against their scale. `scoreInventory()` is pure — no clock, no
-randomness, no I/O, no model call — and returns per-scale `percent`, a `low` /
-`moderate` / `high` band and a sentence describing that band. Out-of-range
-responses raise rather than being clamped; unanswered items are excluded rather
-than treated as neutral, so a partly finished inventory reports what it knows.
+**3. Plan engine (`lib/activities/plan.ts`), 32 tests, written before the code.**
+Pure functions, no Supabase client: `suggestionInputFrom`, `seedRowsFrom`,
+`mergeSuggestions`, `focusState`, `canActivate`, `seasonPlan`. Every workflow
+decision lives here; the model fills one narrow joint.
 
-**Wording**: no published DISC or Enneagram item appears. The two inventories
-modelled on those traditions measure the same families of behaviour in original
-language, and a test fails the build if the catalogue names a licensed instrument.
-The Big Five is adapted from the public-domain IPIP pool.
+**4. Activities page (`app/(app)/activities/`).** Seeded cards with rationale,
+kind badge and fit score; status control (In focus / Set aside / Cut); kind
+editable per card; add-your-own; cut items collapsed into a reopenable section.
 
-### 2. Interview component — `lib/llm/components/interview.ts`
-Stub prompt replaced. Input gained `asked_count` and `max_questions`; output
-gained `input_kind` (`text` / `scale` / `single_choice`), optional `choices`, and
-`suggested_assessments`.
+**5. Focus rule and season plan.** The cap is enforced in the server action.
+"This season's plan" is the focus set plus active one-off sources, derived from
+the same rows. `activities_selected` added to `ONBOARDING_STATES`.
 
-`suggested_assessments` is typed as a **Zod enum of the real catalogue ids**, so
-the JSON Schema the model is shown lists them literally and an invented id fails
-validation, gets the gateway's one corrective retry, then raises. Silently
-dropping a bad id would have left the user with no inventory and no explanation.
-
-`tests/schemas.test.ts` grew a block for these schemas (11 new cases).
-
-### 3. Flow engine — `lib/assessments/flow.ts`
-Deterministic-first and stateless: every function is a pure function of the
-`assessment_answers` rows. No session state, no new table, no migration.
-
-    hobbies:<n>                 phase A, LLM-written, cap 6
-    hobbies:done                phase A closed; answer holds the chosen inventories
-    inv:<catalogue_id>:<item>   phase B, fixed catalogue items, no model calls
-    desires:<n>                 phase C, LLM-written, cap 6
-    desires:done                phase C's interview closed
-    constraints:<key>           budget, sobriety, physical, location, schedule
-
-The code owns the ceiling: if the model keeps saying `more_to_ask`, the engine
-closes the phase at the cap regardless.
-
-### 4. Interview UI — `app/(app)/assessment/`
-One question on screen, a progress bar, and Back. Every answer is written to
-`assessment_answers` by the server action **before** the next question is
-requested (PRD §1.3), so a failure asking cannot lose the answer just given.
-Back walks the stored answers and re-renders each one's widget; saving updates
-that row and never deletes. The first answer advances `onboarding_state` to
-`assessment_started`.
-
-A gateway failure renders the model's real error text, a note that the answers
-so far are saved, and a Retry button. The interview stops on that question: it
-does not skip it and does not invent one.
-
-### 5. Persona synthesis and results — items 5
-Real `persona_synthesis` prompt. Its input gained `inventory_results`: the
-already-scored inventories, so the model interprets numbers it cannot invent.
-On completion an `assessments` row is written with `model_run_id = runId` and
-onboarding advances to `assessment_complete`. The results page shows the persona
-(summary, goals, traits, desired activities) and the scored inventories,
-recomputed from the raw answers on every render. "Redo this section" clears one
-phase and re-asks it; regenerating **inserts** a new row and the page reads the
-latest by `generated_at`.
-
-### 6. Housekeeping
-`docs/specs/12-professionalize.md` 12b item 4 now reads "…OpenRouter and Gemini
-both exercised with real calls in spec 02. Old keys deleted." One line, nothing
-else in that file touched.
+**6. `e2e/assessment.spec.ts`** — 12a item 2's assessment test, plus the
+housekeeping above and the spec 12 line.
 
 ---
 
-## How to check it by hand
+## How to test it by hand
 
-1. `npm run build && npm start`, then open http://localhost:3000 and sign in.
-2. Go to **Assessment**. If Settings has not been completed you get the spec 02
-   gate instead — that is intended.
-3. Answer the first question and hit **Next**. In another tab, Supabase →
-   `assessment_answers` should already have that row. Nothing is batched.
-4. Reload the page mid-interview. You come back to the same position with every
-   earlier answer intact. (An LLM-written question is re-asked, so its wording
-   may differ; a fixed inventory or constraint question comes back identically.)
-5. Click **Back**. The stored answer appears in its own widget. Change it, click
-   **Save this answer**, and check `assessment_answers` — the row was updated,
-   not duplicated.
-6. Force a failure: Settings → Models per component → set **Interview** to a
-   model that does not exist, then redo the hobbies section. The Assessment page
-   shows the provider's real error and a Retry button, and Settings → Run log has
-   an `interview` row with status `error`. Put the model back and press Retry.
-7. Finish the interview, press **Generate my assessment**, and the results page
-   renders. Press **Regenerate the assessment**: the header then reads
-   "version 2 of 2, earlier ones kept".
+```bash
+npm run build && npx next start     # production, not next dev
+```
 
-Unit tests: `npm test` — 194 passing, 4 skipped (the skipped ones are the
-pre-existing live-gateway tests that only run with a flag). `npm run lint` and
-`npm run typecheck` are clean.
+Sign in at http://localhost:3000/login and open **Activities**.
+
+1. **Seeding.** The activities your assessment named are already cards, each
+   with the rationale spec 03 wrote. All of them start *Set aside*: nothing is
+   auto-focused.
+2. **Suggestions.** Click **Suggest more activities**. New cards arrive with a
+   fit score and a "Recurring"/"One-off" badge. Check them against what you
+   said in the interview about budget, drinking, travel and free time.
+3. **Idempotency.** Click it a second time. No duplicate cards, and nothing you
+   had already set or cut changes. Confirm in Supabase:
+   `select name, status, source from activities order by created_at;`
+4. **The focus cap.** Click **In focus** on three recurring activities, then a
+   fourth. It is refused, and the message names what to set aside. Set one
+   aside and the fourth goes in.
+5. **Cut is not delete.** Cut a card, open the **Cut** section, bring it back.
+   Then run suggestions again: it stays cut.
+6. **The cap is the server's rule.** Open Activities in two tabs. Fill the
+   focus set in tab B, then click **In focus** in tab A, whose buttons still
+   believe there is room. The server refuses.
+7. **Add your own.** Add something; it joins the focus set if there is room.
+   Add a name that already exists and it is brought back rather than erroring.
+
+```bash
+npm test            # 242 unit tests pass, 4 skipped (the live-gateway suite)
+npx playwright test # login + assessment, against next build + next start
+```
 
 ---
 
-## Verified — which of the two was done
+## Verified (CLAUDE.md sense)
 
-CLAUDE.md: "`next build` passing is not enough."
+**Both halves.** `next build` passed **and** a production server (`next start`)
+was driven under a real magic-link session through the whole feature. The
+deployed Vercel URL was **not** exercised; verification was local `next start`.
 
-**Both were done.** `next build` succeeds, **and** a production server
-(`npx next start`, port 3100) was driven through a complete assessment under a
-real magic-link session minted with the Supabase admin API and redeemed through
-the app's own `/auth/callback` — the same technique spec 02 and the spec 12a
-Playwright test use. The deployed Vercel URL was not exercised for the
-assessment; verification was local `next start`.
+What a real production run actually did:
 
-What the production run actually did, on the dedicated `e2e+gazelle@example.com`
-account:
+- `/activities` returned **200** under a real authenticated session.
+- Seeded cards rendered with their spec 03 rationale; all `benched` in the
+  database.
+- A real `activity_suggestion` call through the gateway returned **6**
+  suggestions in ~5s, `status: ok`, `attempts: 1`, one `run_log` row
+  (`minimax/minimax-m3:free`, openrouter). Every one respected all five
+  constraints — free, alcohol-free, knee-aware, weeknights/Saturday mornings,
+  Arlington — with fit scores spread **71–92** rather than bunched.
+- A second run produced **no duplicate rows** and **changed no statuses**.
+- Filling the focus set and attempting a fourth was refused with the PRD §1.7
+  reason; the database still held exactly three.
+- **A stale-UI replay from a second browser session was refused by the server**
+  — the page's buttons believed there was room, the action did not. That is the
+  acceptance criterion that matters, since a server action is a public endpoint.
+- `onboarding_state` advanced to `activities_selected`.
+- The committed e2e suite (login + assessment) passed against `next build` +
+  `next start`.
 
-- `/settings` and `/assessment` both returned **200** under auth. The server log
-  for the whole session contains **zero** errors and no 500s.
-- **41 questions** answered end to end: 6 hobbies, 24 inventory items
-  (the model chose `behavioural_profile` and `social_style`), 6 desires,
-  5 constraints.
-- **`run_log`: 13 `interview` rows and 1 `persona_synthesis` row, all `ok`** —
-  every model call logged, as the acceptance criteria require.
-- **Per-answer writes**: after four submissions there were exactly four
-  `assessment_answers` rows.
-- **Resume**: reloading mid-interview came back at the same unanswered position
-  with the four earlier answers intact.
-- **`desired_activities`** stored as `{name, rationale}` objects, e.g.
-  `{"name":"weekly book club","rationale":"You already have history running one…"}`.
-- **`onboarding_state`** ended at `assessment_complete`.
-- **Redo and regenerate**: clicking "Redo: Practical constraints" cleared
-  exactly those five rows and left the hobbies, inventory and desires answers —
-  and every already-generated assessment — untouched. Re-answering the five and
-  regenerating **inserted** a new `assessments` row (2 → 3) rather than
-  overwriting, and the page header then read "version 3 of 3, earlier ones
-  kept". The account ended the session with three assessments, all retained.
-- **Forced gateway failure**: pointing the `interview` component at
-  `gazelle/definitely-not-a-real-model:free` produced, in the UI:
-
-      The interview stopped here.
-      Interview failed on OpenRouter / gazelle/definitely-not-a-real-model:free:
-      openrouter returned HTTP 400: {"error":{"message":"gazelle/definitely-not-a-
-      real-model:free is not a valid model ID","code":400}, ...}
-      Your answers so far are saved. The failure is in the run log on the Settings page.
-      [Retry]
-
-  No **Next** button was rendered — the interview stopped rather than inventing
-  or skipping a question — and `run_log` gained an `interview` row with
-  `status=error`, `error_kind=provider_error`, `attempts=1`. One attempt is
-  correct: the gateway retries malformed output, not an HTTP 400 that would fail
-  identically. Restoring the model and pressing **Retry** asked a real question
-  again ("Tell me what you actually do with your week right now…").
-
-`npm run lint`, `npm run typecheck` and `npm test` (194 passed, 4 skipped) are
-clean, and the committed spec 12a e2e login suite still passes against the same
-production server.
-
-The driver for the assessment run was a throwaway Playwright script in the
-session scratchpad, not a committed test — see "What the next spec needs" below.
+**One production-only bug, found by this rule and not by the build.** The first
+run showed "Nothing on your list yet" on the very render that seeded the rows —
+while the rows were demonstrably in the database. Two identical GETs in one
+render are memoized by Next, so re-reading after the insert returned the
+pre-insert empty list. `next build` passed on it. Fixed by reading the inserted
+rows back from the insert itself rather than re-reading
+(`app/(app)/activities/data.ts`, comment kept there). Same family as spec 01's
+`NAV_ITEMS` bug: invisible until a real production request.
 
 ---
 
 ## What I was unsure about
 
-1. **The two `:done` marker rows.** This is the one design decision the spec left
-   open, and the only place I departed from the letter of scope item 3. The spec
-   requires the position to be derivable "purely from the stored
-   `assessment_answers` rows", with no session state and no new table. But two
-   facts are not recoverable from question-and-answer rows alone: that an
-   LLM-driven phase ended *before* its cap, and *which* inventories the model
-   chose (it returns them alongside the last hobbies question, and the answer row
-   for that question has nowhere to put them — `question_id`, `question_text` and
-   `answer` are all spoken for). So each closing decision is stored as one more
-   answer row, under the same phase prefix as the questions it closes:
-   `hobbies:done` (its `answer` holds the chosen inventory ids) and
-   `desires:done`. They are filtered out of the transcript, the progress count
-   and the UI. No session state, no new table, no migration — but it is a row the
-   user never answered, and you should know it is there. The alternative was to
-   ignore `more_to_ask` and always ask exactly six questions per topic.
+1. **Nothing is seeded or suggested active — my decision, not the spec's.** The
+   spec says seeded rows carry the persona's rationale and that the focus set is
+   the active recurring activities, capped at three. It does not say what status
+   a seed arrives with, and the column default is `active`. Seeding five desired
+   activities as active would break the cap before the user touched anything, so
+   seeds and suggestions both arrive `benched` and the user picks their few —
+   which is PRD §1.7's point. The alternative, letting the code pick the first
+   three, is the app choosing someone's evenings for them. The cost: a card the
+   user has never seen is labelled "Set aside", which reads slightly oddly on a
+   first visit.
 
-2. **Editing an LLM-written question via Back.** Only the question text and the
-   answer are stored, not the `choices` list. So a question that was originally
-   `single_choice` comes back as a text box holding the option that was chosen.
-   Inventory items and the fixed constraint questions come back exactly. Storing
-   the choice list would need a column the spec rules out.
+2. **A re-run can overwrite a user-edited `kind`.** The spec says a re-run
+   updates `rationale`, `fit_score` and `kind`. Item 4 also makes `kind`
+   editable on the card. So if you flip a suggestion to "One-off" and then run
+   suggestions again, the model's `kind` wins. I implemented the spec as
+   written rather than deviating. The fix, if you want it, is to stop updating
+   `kind` on rows that already exist — one line in `mergeSuggestions` — but it
+   costs you the correction when the model's first guess was wrong.
 
-3. **"Redo this section" deletes rows.** It is the only place in the assessment
-   where anything is deleted, and it is scoped to the one phase the user picked.
-   CLAUDE.md's "never delete" rule names communities, events and contacts and
-   those have `status` fields; `assessment_answers` has none, and a stateless
-   engine cannot re-ask a question whose answer row still exists. Generated
-   assessments are never deleted — regenerating always inserts.
+3. **`activities.status` still defaults to `'active'` in Postgres** while every
+   insert in the app passes a status explicitly. Not a bug today; it is a trap
+   for a later spec that inserts an activity without one. Changing the default
+   needs its own migration and was outside this spec.
 
-4. **Redoing hobbies also clears the inventory answers**, because the inventories
-   were chosen *from* the hobbies answers and new answers may pick different
-   ones. Redoing the inventories alone keeps that choice.
+4. **The e2e test seeds rather than drives the interview.** It puts the user one
+   *fixed* question from the end, so resuming and answering need no model call
+   at all, and seeds the persona row for the results assertion. That makes it
+   reliable in CI, but it means the committed test does not exercise the
+   `interview` component itself — spec 03 verified that live, by hand.
 
-5. **A fallback inventory pair.** If the hobbies phase hits its cap without the
-   model naming an inventory, the flow uses `social_style` + `big_five` rather
-   than dead-ending. It did not fire in the verification run.
-
-6. **Model reliability, as the spec predicted.** The interview and persona
-   synthesis both ran on `minimax/minimax-m3:free`, which can 429 at any moment.
-   It did not during verification, but an interactive retry is the whole
-   mitigation here; the provider fallback chain belongs to spec 06.
+5. **Three pre-existing Supabase security advisories** (WARN): `handle_new_user`
+   is a `SECURITY DEFINER` function callable via RPC by `anon` and
+   `authenticated`, and leaked-password protection is off. Neither comes from
+   spec 04 — the function is spec 01's signup trigger, and this app uses magic
+   links, not passwords. Left alone as out of scope; worth a line in 12b.
 
 ---
 
 ## What the next spec needs
 
-- **Spec 04** consumes `assessments.desired_activities`, which is now
-  `{name, rationale}[]` rather than `string[]` (jsonb column, no migration —
-  this was the pre-approved decision in the spec). The rationale is written to
-  be shown to the user.
-- **12a item 2's assessment Playwright test is now unblocked.** Spec 03 verified
-  the flow with a throwaway driver in the scratchpad rather than a committed
-  test, because adding one was not in spec 03's scope. Whoever writes it should
-  know: a full run costs ~13 free-tier model calls and takes about a minute, and
-  the flow can be short-circuited by seeding `assessment_answers` directly, since
-  the engine derives everything from those rows.
+- **Spec 05 searches against the focus set**: `activities` where
+  `status = 'active'` and `kind = 'recurring_community'`, capped by
+  `profiles.focus_cap`. `focusState()` in `lib/activities/plan.ts` computes it;
+  use that rather than re-deriving the filter, so the two cannot disagree.
+- **`onboarding_state` reaching `activities_selected`** is the signal that a
+  focus set exists. Gate discovery on it the way `/assessment` gates on
+  `models_configured`.
+- **One-off sources are activities too.** `kind = 'one_off_source'` rows are
+  active and uncapped, and spec 05 should search them differently — a source of
+  individual events, not a group to join. `communities.type` already has a
+  matching `one_off_source` value.
+- **`communities.focus` is still unused and still spec 05's.** Spec 04
+  deliberately did not touch it: the activity-level focus set is derived from
+  `status` and `kind`, and per-community focus is a different question.
 - **The four GitHub repository secrets are still unset**, so the Playwright CI
-  job continues to skip itself. `next build` + `next start` under real auth has
-  never run in CI. Names and steps are in STATUS.md.
-- Inventory scores are still never stored. Anything that needs them recomputes
-  with `scoredInventoriesFrom(answers)`.
+  job continues to skip itself — now skipping two suites rather than one.
+  `next build` + `next start` under real auth has still never run in CI. Names
+  and steps are in STATUS.md. This is the one outstanding action for Eric.
+- Suggestions are **user-triggered only**. Nothing here runs on a schedule;
+  scheduled discovery is spec 06 and follows the addendum.

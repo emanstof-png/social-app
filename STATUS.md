@@ -1,6 +1,6 @@
 # STATUS — gazelle kanban
 
-**Actual build order so far: 00 → 01 → 02 → 12a (pulled forward) → 03.** `docs/BUILD_PHASES.md` carries the same note and the reason 12a moved. Next is spec 04.
+**Actual build order so far: 00 → 01 → 02 → 12a (pulled forward) → 03 → 04.** `docs/BUILD_PHASES.md` carries the same note and the reason 12a moved. Next is spec 05.
 
 **Action needed from Eric (still outstanding):** the Playwright CI job skips itself — green, with a log line saying so — until four GitHub **repository secrets** exist on `github.com/emanstof-png/social-app` (Settings → Secrets and variables → Actions → New repository secret):
 `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `ENCRYPTION_KEY`.
@@ -9,7 +9,6 @@ Their values are the ones already in `.env.local`. Until they are set, no end-to
 **Addenda waiting to be read when their spec is drafted:** `docs/specs/05-discovery-addendum.md` (spec 05) and `docs/specs/06-scheduled-jobs-addendum.md` (spec 06). Both settle decisions made during spec 02 and override the one-line descriptions in `docs/BUILD_PHASES.md`. `docs/specs/10-crm-addition-note.md` is a smaller note of the same kind for spec 10.
 
 ## Backlog
-- [SPINE] spec 04 activities-and-focus
 - [DISCOVER] spec 05 community-discovery (draft spec first) — read `docs/specs/05-discovery-addendum.md` when drafting. Settled 2026-09-06: Gemini grounding is off the table (quota-blocked, no billing), so discovery uses a search-provider fallback chain Exa -> Tavily -> Serper, all no-card free tiers, plus an explicit multi-round deep-research loop. Needs an Exa key (and Tavily/Serper keys for the fallbacks). The model_settings mapping TODO is done: defaults ship in `lib/llm/catalog.ts` and are seeded on first load.
 - [FEED] spec 06 calendar-scraping (draft spec first) — read `docs/specs/06-scheduled-jobs-addendum.md` when drafting. Settled 2026-09-06: unattended jobs get a model-provider fallback chain Gemini -> OpenRouter free -> Ollama Cloud, no OpenRouter credit purchased.
 - [FEED] spec 07 feed-and-calendar-views (draft spec first)
@@ -19,8 +18,8 @@ Their values are the ones already in `.env.local`. Until they are set, no end-to
 - [LOOP] spec 11 weekly-planning-and-invites (draft spec first) — scheduled parts follow `docs/specs/06-scheduled-jobs-addendum.md`.
 
 ## Next
-- [SPINE] spec 04 activities-and-focus — spec already written (`docs/specs/04-activities-and-focus.md`). Consumes `assessments.desired_activities`, which spec 03 widened from `string[]` to `{name, rationale}[]`; the rationale is there to be shown.
-- 12a item 2, still deferred: the assessment flow now exists, so its Playwright test can be written into `e2e/`. Spec 03 verified the flow with a throwaway driver rather than a committed test, because adding one was not in spec 03's scope — see REVIEW.md. Event selection still waits for spec 07.
+- [DISCOVER] spec 05 community-discovery — draft the spec first, reading `docs/specs/05-discovery-addendum.md`. It searches against the focus set spec 04 built: the activities with `status = 'active'` and `kind = 'recurring_community'`, capped at `profiles.focus_cap`. `onboarding_state` reaching `activities_selected` is the signal that a focus set exists.
+- 12a item 2: assessment test DONE (spec 04 item 6, `e2e/assessment.spec.ts`). Event selection still waits for spec 07.
 
 ## In Progress
 - (none)
@@ -29,6 +28,15 @@ Their values are the ones already in `.env.local`. Until they are set, no end-to
 - (none)
 
 ## Done
+- spec 04 activity-selection — done 2026-09-06, tag `spec-04`. All six scope items. The persona is now a short, committed list of activities with a focus set spec 05 can search against.
+  - **Spec re-drafted before building.** The original `04-activities-and-focus.md` sketch predated specs 01–03; it was replaced by `docs/specs/04-activity-selection.md`, drafted against what spec 03 actually shipped, and deleted. Nothing in it was dropped.
+  - Migration 0006: `activity_kind` enum, `activities.kind` (default `recurring_community`), `activities.fit_score` (0–100, advisory), `profiles.focus_cap` (2–4, default 3). Applied to wqawpwbgrsjusbdopgbi and verified in `information_schema`.
+  - **The focus set has no column.** It is derived: `status = 'active'` and `kind = 'recurring_community'`. `communities.focus` stays spec 05's, per-community flag. One idea, one source of truth.
+  - **Nothing is ever seeded or suggested active.** The persona's desired activities and every model suggestion arrive `benched`, so the cap holds from the first render and the user picks their own few. This was a decision made while building, not in the spec — see REVIEW.md.
+  - Re-running suggestions updates `rationale`, `fit_score` and `kind` only, never `status` or `source`, and writes only fields that actually differ — so a second identical run is a no-op and cannot resurrect something cut.
+  - `activities_selected` added to `ONBOARDING_STATES`, advanced when the focus set first has something in it. Spec 05 gates on it.
+  - **Production-only bug found by the verification rule, not by the build:** two identical GETs in one render are memoized by Next, so re-reading after the seeding insert returned the pre-insert empty list and the page rendered "nothing on your list" on the very render that seeded it. `next build` passed and the rows were really in the database. Fixed by reading the inserted rows back from the insert itself (`app/(app)/activities/data.ts`). Same family as spec 01's `NAV_ITEMS` bug: invisible until a real production request.
+  - Verified per the CLAUDE.md rule, **both halves**: `next build` passed AND a production server (`next start`) was driven under a real magic-link session through the whole feature — `/activities` returned 200, seeded cards rendered with their spec 03 rationale, a real `activity_suggestion` run returned 6 constraint-respecting suggestions (free, alcohol-free, knee-aware, weeknights/Saturday, Arlington) with fit scores spread 71–92 and an `ok` run_log row, a second run produced no duplicates and changed no statuses, the focus cap refused a fourth activation, and a **stale-UI replay from a second session was refused by the server**, which is where the rule actually lives. The deployed Vercel URL was not exercised; verification was local `next start`. The committed e2e suite (login + assessment) passes against `next build` + `next start`.
 - spec 03 assessment-interview — done 2026-09-06, tag `spec-03`. All six scope items. A signed-in user with configured models now becomes a stored persona: hobbies interview, 1–2 model-chosen inventories, desires and constraints, then a generated assessment.
   - `lib/assessments/catalogue.ts`: four inventories (behavioural profile, short Big Five, core motivations, social style), 43 items, all original wording — no published DISC or Enneagram item, Big Five adapted from the public-domain IPIP pool. Scoring is a pure function, never a model call, and scores are recomputed from the raw answers on every read rather than stored. No migration was needed for this spec.
   - `lib/assessments/flow.ts`: the workflow is deterministic code and derives its position purely from the stored `assessment_answers` rows — no session state, no new table. Question ids carry the phase (`hobbies:<n>`, `inv:<id>:<item>`, `desires:<n>`, `constraints:<key>`).

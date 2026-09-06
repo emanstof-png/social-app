@@ -12,10 +12,10 @@
 - [LOOP] spec 11 weekly-planning-and-invites (draft spec first)
 
 ## Next
-- [SPINE] spec 02 llm-gateway-and-model-settings — TODO: wire up model_settings so discovery_research uses Gemini and all other components use OpenRouter free-tier models by default (user-editable per PRD)
+- [SPINE] spec 03 assessment-interview
 
 ## In Progress
-- (none)
+- [SPINE] spec 02 llm-gateway-and-model-settings — started 2026-09-06. Defaults wired per the old TODO: discovery_research on Gemini, all other components on an OpenRouter free-tier model, user-editable per PRD §5.
 
 ## Blocked
 - (none)

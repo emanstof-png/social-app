@@ -42,6 +42,8 @@ const enumSchemas: Record<string, z.ZodEnum<Record<string, string>>> = {
   llm_component: schemas.llmComponent,
   llm_provider: schemas.llmProvider,
   record_status: schemas.recordStatus,
+  run_status: schemas.runStatus,
+  run_error_kind: schemas.runErrorKind,
 };
 
 describe("schemas match the migrations", () => {

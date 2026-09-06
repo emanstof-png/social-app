@@ -1,17 +1,32 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 /**
  * Minimal readers for the migration SQL, so tests can compare the Zod schemas
  * against the actual migrations rather than against a second hand-maintained
  * list that could drift in the same direction.
+ *
+ * Every migration is read in filename order and applied in sequence, not just
+ * the one that first created a table. Spec 02 added columns to run_log in
+ * 0005, and a reader that only looked at 0002 would report the original shape
+ * and quietly stop checking anything added later.
  */
 
+const MIGRATIONS_DIR = fileURLToPath(
+  new URL("../supabase/migrations/", import.meta.url),
+);
+
 function read(file: string) {
-  return readFileSync(
-    fileURLToPath(new URL(`../supabase/migrations/${file}`, import.meta.url)),
-    "utf8",
-  );
+  return readFileSync(new URL(file, `file://${MIGRATIONS_DIR}`), "utf8");
+}
+
+/** Every migration, in filename order, with comments stripped. */
+function allMigrationSql(): string {
+  return readdirSync(MIGRATIONS_DIR)
+    .filter((file) => file.endsWith(".sql"))
+    .sort()
+    .map((file) => stripComments(read(file)))
+    .join("\n");
 }
 
 function stripComments(sql: string) {
@@ -58,9 +73,12 @@ const CONSTRAINT_KEYWORDS = new Set([
   "like",
 ]);
 
-/** Table name -> column names, in declaration order. */
+/**
+ * Table name -> column names, in declaration order, after every migration has
+ * been applied in sequence.
+ */
 export function tableColumns(): Record<string, string[]> {
-  const sql = stripComments(read("0002_tables.sql"));
+  const sql = allMigrationSql();
   const tables: Record<string, string[]> = {};
 
   for (const [, table, body] of sql.matchAll(
@@ -72,12 +90,34 @@ export function tableColumns(): Record<string, string[]> {
       .filter((name) => !CONSTRAINT_KEYWORDS.has(name.toLowerCase()));
   }
 
+  // Then replay the later alterations. One statement may carry several
+  // comma-separated `add column` / `drop column` clauses.
+  for (const [, table, body] of sql.matchAll(
+    /alter table public\.(\w+)([\s\S]*?);/g,
+  )) {
+    const columns = tables[table];
+    if (!columns) continue;
+
+    for (const [, name] of body.matchAll(
+      /\badd column\s+(?:if not exists\s+)?"?(\w+)"?/g,
+    )) {
+      if (!columns.includes(name)) columns.push(name);
+    }
+
+    for (const [, name] of body.matchAll(
+      /\bdrop column\s+(?:if exists\s+)?"?(\w+)"?/g,
+    )) {
+      const at = columns.indexOf(name);
+      if (at !== -1) columns.splice(at, 1);
+    }
+  }
+
   return tables;
 }
 
-/** Enum type name -> labels, in declaration order. */
+/** Enum type name -> labels, in declaration order, across all migrations. */
 export function enumLabels(): Record<string, string[]> {
-  const sql = stripComments(read("0001_enums.sql"));
+  const sql = allMigrationSql();
   const enums: Record<string, string[]> = {};
 
   for (const [, name, body] of sql.matchAll(

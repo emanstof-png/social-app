@@ -1,4 +1,4 @@
-import type { z } from "zod";
+import { z } from "zod";
 
 import type { LlmComponent } from "../schemas/enums";
 import type { ChatMessage, ToolDefinition } from "./types";
@@ -21,6 +21,15 @@ export type ComponentDefinition<
   systemPrompt: string;
   /** Turns validated input into the chat turns sent to the provider. */
   buildMessages: (input: z.infer<InputSchema>) => ChatMessage[];
+  /**
+   * A canned input for the "Sample run" button in Settings.
+   *
+   * Spec 02 builds the gateway but nothing that calls it yet, so without this
+   * there is no way to produce a run_log row, and two of the spec's own
+   * acceptance criteria (a dropdown change showing up in run_log, and the
+   * side-by-side rerun) could not be demonstrated until spec 03.
+   */
+  sampleInput: z.infer<InputSchema>;
   tools?: ToolDefinition[];
   /**
    * Reasoning models spend this budget on hidden thinking before any visible
@@ -37,10 +46,38 @@ export type ComponentDefinition<
  */
 export const JSON_ONLY_INSTRUCTION =
   "Reply with a single JSON object and nothing else. No prose, no explanation, " +
-  "no markdown code fences. The object must match the schema described above " +
-  "exactly.";
+  "no markdown code fences. Include every required property, even when a value " +
+  "is empty: use [] for an empty list and null for an unknown value. Do not add " +
+  "properties that are not in the schema.";
+
+/**
+ * The component's output schema, as JSON Schema, for the model to follow.
+ *
+ * Derived from the Zod schema rather than written by hand so the two cannot
+ * drift: the same object the model is shown is the one its reply is validated
+ * against. Without this the models were told to match "the schema" while
+ * nothing in the prompt described it, and free models duly omitted required
+ * keys -- minimax/minimax-m3:free dropped `goals` from persona_synthesis on
+ * both the first attempt and the retry.
+ */
+export function outputSchemaJson(definition: ComponentDefinition): string {
+  const schema = z.toJSONSchema(definition.outputSchema, {
+    // The reply is validated by Zod anyway; unrepresentable corners should not
+    // stop a prompt being built.
+    unrepresentable: "any",
+    io: "output",
+  });
+  return JSON.stringify(schema, null, 2);
+}
 
 /** Builds the full system prompt for a component. */
 export function systemPromptFor(definition: ComponentDefinition): string {
-  return `${definition.systemPrompt}\n\n${JSON_ONLY_INSTRUCTION}`;
+  return [
+    definition.systemPrompt,
+    "",
+    "Your reply must validate against this JSON Schema:",
+    outputSchemaJson(definition),
+    "",
+    JSON_ONLY_INSTRUCTION,
+  ].join("\n");
 }

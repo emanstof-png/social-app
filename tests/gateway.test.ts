@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { outputSchemaJson, systemPromptFor } from "@/lib/llm/component";
+import { COMPONENT_REGISTRY } from "@/lib/llm/components";
 import { GatewayError } from "@/lib/llm/errors";
 import {
   extractJson,
@@ -362,5 +364,41 @@ describe("runComponentWith", () => {
     const system = callProvider.mock.calls[0][0].system as string;
     expect(system).toContain("single JSON object");
     expect(system).toContain("no markdown code fences");
+  });
+
+  it("describes the output schema in the prompt, naming its required keys", async () => {
+    // Without this the prompt told the model to match "the schema" while
+    // nothing described it, and free models omitted required keys.
+    const { deps, callProvider } = harness([reply(JSON.stringify(VALID_PERSONA))]);
+
+    await runComponentWith(deps, "persona_synthesis", PERSONA_INPUT);
+
+    const system = callProvider.mock.calls[0][0].system as string;
+    expect(system).toContain("JSON Schema");
+    expect(system).toContain("summary");
+    expect(system).toContain("goals");
+    expect(system).toContain("desired_activities");
+  });
+});
+
+describe("systemPromptFor", () => {
+  it("derives the schema from Zod for every registered component", () => {
+    // Guards against a component whose schema cannot be rendered as JSON
+    // Schema, which would break its prompt at runtime rather than here.
+    for (const [id, definition] of Object.entries(COMPONENT_REGISTRY)) {
+      const prompt = systemPromptFor(definition);
+      expect(prompt, id).toContain("JSON Schema");
+      expect(() => JSON.parse(outputSchemaJson(definition))).not.toThrow();
+    }
+  });
+
+  it("gives every component a sample input that passes its own input schema", () => {
+    // The Settings "Sample run" button relies on these being valid.
+    for (const [id, definition] of Object.entries(COMPONENT_REGISTRY)) {
+      const parsed = definition.inputSchema.safeParse(definition.sampleInput);
+      expect(parsed.success, `${id}: ${JSON.stringify(parsed.error?.issues)}`).toBe(
+        true,
+      );
+    }
   });
 });

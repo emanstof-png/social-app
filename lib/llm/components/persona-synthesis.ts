@@ -32,5 +32,12 @@ export const personaSynthesisComponent: ComponentDefinition<
   buildMessages: (input) => [
     { role: "user", content: JSON.stringify(input) },
   ],
+  sampleInput: {
+    answers: [
+      { question: "What do you enjoy?", answer: "Rucking and sailing." },
+      { question: "What do you want socially?", answer: "A few close friends nearby." },
+    ],
+    assessment_types_used: ["DISC"],
+  },
   maxOutputTokens: 8192,
 };

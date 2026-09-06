@@ -47,5 +47,17 @@ export const weeklyPlanningComponent: ComponentDefinition<
   buildMessages: (input) => [
     { role: "user", content: JSON.stringify(input) },
   ],
+  sampleInput: {
+    week_of: "2026-09-07",
+    focus_communities: ["Arlington Ruck Club"],
+    candidate_events: [
+      {
+        event_id: "11111111-1111-4111-8111-111111111111",
+        title: "Weekly Ruck",
+        starts_at: "2026-09-12T11:00:00Z",
+        community: "Arlington Ruck Club",
+      },
+    ],
+  },
   maxOutputTokens: 8192,
 };

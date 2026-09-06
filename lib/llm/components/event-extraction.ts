@@ -53,6 +53,15 @@ export const eventExtractionComponent: ComponentDefinition<
   buildMessages: (input) => [
     { role: "user", content: JSON.stringify(input) },
   ],
+  sampleInput: {
+    community_name: "Arlington Ruck Club",
+    source_url: "https://example.org/calendar",
+    page_text:
+      "Weekly Ruck: every Saturday 7:00am at Bluemont Park. Free. " +
+      "Monthly Social: March 14, 6:30pm at the clubhouse, $10, RSVP required.",
+    today: "2026-09-06",
+    timezone: "America/New_York",
+  },
   maxOutputTokens: 16384,
   temperature: 0,
 };

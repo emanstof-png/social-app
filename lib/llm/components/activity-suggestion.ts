@@ -36,5 +36,10 @@ export const activitySuggestionComponent: ComponentDefinition<
   buildMessages: (input) => [
     { role: "user", content: JSON.stringify(input) },
   ],
+  sampleInput: {
+    persona_summary: "Disciplined, outdoorsy, wants a small tight circle.",
+    goals: ["Make three close friends within a year"],
+    existing_activities: ["Rucking"],
+  },
   maxOutputTokens: 8192,
 };

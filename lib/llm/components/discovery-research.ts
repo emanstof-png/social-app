@@ -49,5 +49,11 @@ export const discoveryResearchComponent: ComponentDefinition<
   buildMessages: (input) => [
     { role: "user", content: JSON.stringify(input) },
   ],
+  sampleInput: {
+    activity: "rucking",
+    location: "Arlington, Virginia",
+    round: 1,
+    already_found: [],
+  },
   maxOutputTokens: 16384,
 };

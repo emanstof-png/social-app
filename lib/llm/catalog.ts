@@ -131,8 +131,11 @@ export type ModelOption = {
  * "Test" button that makes a real call to confirm a model actually works.
  */
 export const FALLBACK_MODELS: Record<LlmProvider, readonly ModelOption[]> = {
+  // Ordered by what actually answered on 2026-09-06. OpenRouter's free tier
+  // runs on a shared upstream pool, so a free model can return 429
+  // "temporarily rate-limited upstream" while the key is perfectly valid and
+  // other free models answer in the same second. Keep more than one here.
   openrouter: [
-    { id: "z-ai/glm-5.2:free", label: "GLM 5.2 (free)", supportsTools: true },
     { id: "minimax/minimax-m3:free", label: "MiniMax M3 (free)", supportsTools: true },
     {
       id: "nvidia/nemotron-3-super-120b-a12b:free",
@@ -140,6 +143,8 @@ export const FALLBACK_MODELS: Record<LlmProvider, readonly ModelOption[]> = {
       supportsTools: true,
     },
     { id: "openrouter/free", label: "OpenRouter auto (free)", supportsTools: true },
+    // Answered a plain completion earlier the same day, then went 429.
+    { id: "z-ai/glm-5.2:free", label: "GLM 5.2 (free)", supportsTools: true },
   ],
   gemini: [
     { id: "gemini-3.6-flash", label: "Gemini 3.6 Flash", supportsTools: true },
@@ -168,15 +173,15 @@ export const DEFAULT_MODEL_SETTINGS: Record<
   LlmComponent,
   { provider: LlmProvider; model: string; supports_tools: boolean }
 > = {
-  interview: { provider: "openrouter", model: "z-ai/glm-5.2:free", supports_tools: true },
+  interview: { provider: "openrouter", model: "minimax/minimax-m3:free", supports_tools: true },
   persona_synthesis: {
     provider: "openrouter",
-    model: "z-ai/glm-5.2:free",
+    model: "minimax/minimax-m3:free",
     supports_tools: true,
   },
   activity_suggestion: {
     provider: "openrouter",
-    model: "z-ai/glm-5.2:free",
+    model: "minimax/minimax-m3:free",
     supports_tools: true,
   },
   discovery_research: {
@@ -186,17 +191,17 @@ export const DEFAULT_MODEL_SETTINGS: Record<
   },
   event_extraction: {
     provider: "openrouter",
-    model: "z-ai/glm-5.2:free",
+    model: "minimax/minimax-m3:free",
     supports_tools: true,
   },
   weekly_planning: {
     provider: "openrouter",
-    model: "z-ai/glm-5.2:free",
+    model: "minimax/minimax-m3:free",
     supports_tools: true,
   },
   invite_suggestion: {
     provider: "openrouter",
-    model: "z-ai/glm-5.2:free",
+    model: "minimax/minimax-m3:free",
     supports_tools: true,
   },
 };

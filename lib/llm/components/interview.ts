@@ -39,5 +39,11 @@ export const interviewComponent: ComponentDefinition<
       }),
     },
   ],
+  sampleInput: {
+    topic: "hobbies",
+    answers_so_far: [
+      { question: "What do you do on weekends?", answer: "Long walks, usually alone." },
+    ],
+  },
   maxOutputTokens: 4096,
 };

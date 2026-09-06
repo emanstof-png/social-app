@@ -62,5 +62,23 @@ export const inviteSuggestionComponent: ComponentDefinition<
   buildMessages: (input) => [
     { role: "user", content: JSON.stringify(input) },
   ],
+  sampleInput: {
+    week_of: "2026-09-07",
+    contacts: [
+      {
+        contact_id: "22222222-2222-4222-8222-222222222222",
+        name: "Sam",
+        met_at: "Weekly Ruck",
+        times_seen: 2,
+      },
+    ],
+    events: [
+      {
+        event_id: "11111111-1111-4111-8111-111111111111",
+        title: "Weekly Ruck",
+        starts_at: "2026-09-12T11:00:00Z",
+      },
+    ],
+  },
   maxOutputTokens: 8192,
 };

@@ -97,12 +97,15 @@ Applied to `wqawpwbgrsjusbdopgbi` and verified.
 Per the CLAUDE.md rule, "verified" is not `next build` passing:
 
 - `next build` passes, `tsc --noEmit` clean, `eslint` clean, 105 tests pass.
-- **A production server was exercised under real authentication.** `next start`
-  on a built bundle, signed in through the actual magic-link flow (admin
-  `generate_link` → the real `/auth/callback` route → session cookie), then
-  `GET /settings` returned **200** with all sections rendered, and
-  `GET /assessment` returned **200** showing the gate. No 500, no
-  client-boundary error.
+- **A production server was exercised under real authentication, twice.**
+  Signed in through the actual magic-link flow both times (admin
+  `generate_link` → the real `/auth/callback` route → session cookie):
+  - Local `next start` on a built bundle: `GET /settings` **200** with all
+    sections rendered, `GET /assessment` **200** showing the onboarding gate.
+  - **The deployed URL** https://gazelle-psi.vercel.app after the push:
+    `GET /settings` **200**, 359KB, all sections, the new default model
+    present, and both `OPENROUTER_API_KEY` and `GEMINI_API_KEY` detected from
+    Vercel's environment. No 500, no client-boundary error.
 - **The rotated keys were exercised with real API calls**, not just auth pings.
   OpenRouter and Gemini each ran `persona_synthesis` end to end and wrote a real
   `run_log` row, and a rerun linked back to its original.

@@ -7,6 +7,11 @@ import { z } from "zod";
 
 export const activitySource = z.enum(["assessment", "suggested", "user"]);
 export const activityStatus = z.enum(["active", "benched", "cut"]);
+/**
+ * Spec 04. Recurring communities are what the focus cap limits (PRD §1.7);
+ * one-off sources are not capped.
+ */
+export const activityKind = z.enum(["recurring_community", "one_off_source"]);
 
 export const communityType = z.enum([
   "community_event",
@@ -54,6 +59,7 @@ export const recordStatus = z.enum(["active", "archived"]);
 
 export type ActivitySource = z.infer<typeof activitySource>;
 export type ActivityStatus = z.infer<typeof activityStatus>;
+export type ActivityKind = z.infer<typeof activityKind>;
 export type CommunityType = z.infer<typeof communityType>;
 export type CalendarKind = z.infer<typeof calendarKind>;
 export type CommunityStatus = z.infer<typeof communityStatus>;

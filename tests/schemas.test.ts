@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 
 import { CATALOGUE_IDS } from "@/lib/assessments/catalogue";
+import {
+  activitySuggestionInput,
+  activitySuggestionOutput,
+} from "@/lib/llm/components/activity-suggestion";
 import { interviewInput, interviewOutput } from "@/lib/llm/components/interview";
 import * as schemas from "@/lib/schemas";
 import { enumLabels, tableColumns } from "./migration-sql";
@@ -33,6 +37,7 @@ const rowSchemas: Record<string, z.ZodObject> = {
 const enumSchemas: Record<string, z.ZodEnum<Record<string, string>>> = {
   activity_source: schemas.activitySource,
   activity_status: schemas.activityStatus,
+  activity_kind: schemas.activityKind,
   community_type: schemas.communityType,
   calendar_kind: schemas.calendarKind,
   community_status: schemas.communityStatus,
@@ -103,6 +108,8 @@ describe("row schemas reject bad data", () => {
     rationale: "Supports discipline",
     source: "assessment",
     status: "active",
+    kind: "recurring_community",
+    fit_score: 82,
   };
 
   it("accepts a realistic activity row", () => {
@@ -153,6 +160,29 @@ describe("row schemas reject bad data", () => {
     expect(() =>
       schemas.evaluationRow.parse({ ...evaluation, ease_of_meeting: 0 }),
     ).toThrow();
+  });
+
+  it("enforces the 0-100 fit_score range the check constraint enforces (spec 04)", () => {
+    expect(schemas.activityRow.parse({ ...activity, fit_score: 0 }).fit_score).toBe(0);
+    expect(schemas.activityRow.parse({ ...activity, fit_score: null }).fit_score).toBeNull();
+    expect(() => schemas.activityRow.parse({ ...activity, fit_score: 101 })).toThrow();
+    expect(() => schemas.activityRow.parse({ ...activity, fit_score: -1 })).toThrow();
+    expect(() => schemas.activityRow.parse({ ...activity, fit_score: 4.5 })).toThrow();
+  });
+
+  it("enforces the 2-4 focus_cap range the check constraint enforces (spec 04)", () => {
+    const profile = {
+      user_id: base.user_id,
+      timezone: "America/New_York",
+      home_location: "Arlington",
+      onboarding_state: "assessment_complete",
+      focus_cap: 3,
+      created_at: base.created_at,
+      updated_at: base.updated_at,
+    };
+    expect(schemas.profileRow.parse(profile).focus_cap).toBe(3);
+    expect(() => schemas.profileRow.parse({ ...profile, focus_cap: 1 })).toThrow();
+    expect(() => schemas.profileRow.parse({ ...profile, focus_cap: 5 })).toThrow();
   });
 
   it("requires an entity_id or entity_name on a preference, as the check constraint does", () => {
@@ -294,6 +324,101 @@ describe("interview component schemas (spec 03 item 2)", () => {
     ).toThrow();
     expect(() =>
       interviewInput.parse({ topic: "hobbies", asked_count: 1.5 }),
+    ).toThrow();
+  });
+});
+
+describe("activity_suggestion component schemas (spec 04 item 2)", () => {
+  const suggestion = {
+    name: "Bouldering",
+    rationale: "You like structure and repetition, and the same faces turn up.",
+    supports_goal: "Be a regular somewhere within three months",
+    kind: "recurring_community",
+    fit_score: 78,
+  };
+
+  it("accepts a well-formed suggestion", () => {
+    const parsed = activitySuggestionOutput.parse({ suggestions: [suggestion] });
+    expect(parsed.suggestions[0]).toMatchObject({ name: "Bouldering", fit_score: 78 });
+  });
+
+  it("defaults to an empty list rather than failing when nothing fits", () => {
+    // Constraints can rule everything out, and the prompt says to return fewer
+    // rather than stretch one to fit. That must not be a schema error.
+    expect(activitySuggestionOutput.parse({}).suggestions).toEqual([]);
+  });
+
+  it("rejects a kind that is not one of the two the table stores", () => {
+    expect(() =>
+      activitySuggestionOutput.parse({
+        suggestions: [{ ...suggestion, kind: "hobby" }],
+      }),
+    ).toThrow();
+  });
+
+  it("rejects a fit_score outside the column's check constraint", () => {
+    for (const fit_score of [-1, 101, 55.5]) {
+      expect(() =>
+        activitySuggestionOutput.parse({ suggestions: [{ ...suggestion, fit_score }] }),
+      ).toThrow();
+    }
+  });
+
+  it("requires a supports_goal, so a suggestion cannot support nothing", () => {
+    expect(() =>
+      activitySuggestionOutput.parse({
+        suggestions: [{ ...suggestion, supports_goal: "" }],
+      }),
+    ).toThrow();
+  });
+
+  it("caps the list at eight so one run cannot flood the page", () => {
+    const many = Array.from({ length: 9 }, (_, index) => ({
+      ...suggestion,
+      name: `Activity ${index}`,
+    }));
+    expect(() => activitySuggestionOutput.parse({ suggestions: many })).toThrow();
+  });
+
+  it("takes the widened input the plan engine builds", () => {
+    const parsed = activitySuggestionInput.parse({
+      persona_summary: "Steady, outdoorsy, slow to warm.",
+      goals: ["Be a regular somewhere within three months"],
+      traits: ["steady"],
+      desired_activities: [{ name: "Rucking", rationale: "It suits your discipline." }],
+      existing_activities: ["Rucking", "Golf"],
+      constraints: {
+        budget: "Nothing — free events only",
+        sobriety: "I need alcohol-free settings",
+        physical: "nothing",
+        location: "Arlington, 30 minutes",
+        schedule: "Weeknights",
+      },
+    });
+    expect(parsed.constraints.budget).toBe("Nothing — free events only");
+    expect(parsed.existing_activities).toContain("Golf");
+  });
+
+  it("fills in missing constraint answers rather than refusing to run", () => {
+    // A user can reach this page with an older assessment whose constraint rows
+    // are incomplete; that should degrade, not raise.
+    const parsed = activitySuggestionInput.parse({
+      persona_summary: "Steady.",
+      goals: ["Meet people"],
+    });
+    expect(parsed.constraints).toEqual({
+      budget: "",
+      sobriety: "",
+      physical: "",
+      location: "",
+      schedule: "",
+    });
+    expect(parsed.traits).toEqual([]);
+  });
+
+  it("still requires a goal to suggest against", () => {
+    expect(() =>
+      activitySuggestionInput.parse({ persona_summary: "Steady.", goals: [] }),
     ).toThrow();
   });
 });

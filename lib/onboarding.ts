@@ -20,6 +20,11 @@ export const ONBOARDING_STATES = [
   "assessment_started",
   /** Assessment finished; the app is usable (spec 03). */
   "assessment_complete",
+  /**
+   * Step 3 done: at least one recurring activity is in the focus set (spec 04).
+   * Spec 05 searches for communities against that set, so it gates on this.
+   */
+  "activities_selected",
 ] as const;
 
 export type OnboardingState = (typeof ONBOARDING_STATES)[number];
@@ -39,6 +44,11 @@ function rank(state: string): number {
 /** True once the user has completed model setup, spec 02's onboarding step. */
 export function hasConfiguredModels(state: string): boolean {
   return rank(state) >= rank("models_configured");
+}
+
+/** True once the assessment has produced a persona, spec 03's step. */
+export function hasCompletedAssessment(state: string): boolean {
+  return rank(state) >= rank("assessment_complete");
 }
 
 /** Advances onboarding, never rewinds it. */

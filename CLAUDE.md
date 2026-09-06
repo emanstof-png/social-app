@@ -1,4 +1,4 @@
-# CLAUDE.md — social-app build rules
+# CLAUDE.md — gazelle build rules
 
 ## Prime directive
 Implement the ONE spec file named in the session prompt exactly. If the spec is ambiguous or you want to deviate, STOP and ask. Never silently improvise. Never add features not in docs/PRD.md.

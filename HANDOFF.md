@@ -1,4 +1,4 @@
-CONTEXT HANDOFF — social-app
+CONTEXT HANDOFF — gazelle
 
 WHO I AM / HOW TO WORK WITH ME:
 - I build with Claude Code in Terminal/VS Code on a Mac mini. Super beginner at dev tooling; paste-and-click. Explain commands when giving them.

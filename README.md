@@ -1,4 +1,4 @@
-# social-app
+# gazelle
 A hand-guided web app for building a social life: assess → focus → discover communities → scrape calendars → pick events → evaluate → CRM → plan weekly.
 
 ## How this repo is run

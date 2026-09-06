@@ -1,4 +1,4 @@
-# ARCHITECTURE — social-app
+# ARCHITECTURE — gazelle
 
 ## Stack
 - **Frontend:** Next.js (App Router), TypeScript, Tailwind. Installable PWA (iPhone home-screen install enables web push).

@@ -1,4 +1,4 @@
-# SETUP CHECKLIST — social-app
+# SETUP CHECKLIST — gazelle
 Work top to bottom. Each box is one concrete action. Ask Claude (any chat) if a step errors; paste the exact error.
 
 ## A. Machine setup (one time, ~30 min)
@@ -15,7 +15,7 @@ Work top to bottom. Each box is one concrete action. Ask Claude (any chat) if a 
 
 ## B. Accounts (one time, ~20 min) — OPTIONAL: skip B and C and let spec 00 guide you instead
 - [ ] Vercel account (vercel.com) — sign in with GitHub.
-- [ ] Supabase: create a new project named `social-app`. Save: Project URL, anon key, service role key (Settings → API).
+- [ ] Supabase: create a new project named `gazelle`. Save: Project URL, anon key, service role key (Settings → API).
 - [ ] Google Cloud: create a project, enable Google Calendar API, create OAuth credentials (needed in Phase 7, can skip until then).
 - [ ] Model API keys: Anthropic key (console.anthropic.com), OpenRouter key (openrouter.ai — one key = most open models). Optional: Groq.
 

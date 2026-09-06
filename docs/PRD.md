@@ -1,4 +1,4 @@
-# PRD — social-app (FROZEN)
+# PRD — gazelle (FROZEN)
 Purpose: give a person a social life by systematically finding communities, attending, evaluating, and converting acquaintances into friends. Hand-guided web app; the user never has to remember what to ask a chatbot. All features below are required. Do not add features.
 
 ## 1. Assessment

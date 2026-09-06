@@ -1,4 +1,4 @@
-# STATUS — social-app kanban
+# STATUS — gazelle kanban
 
 ## Backlog
 - [SPINE] spec 03 assessment-interview

@@ -3,16 +3,16 @@
 ## Backlog
 - [SPINE] spec 03 assessment-interview
 - [SPINE] spec 04 activities-and-focus
-- [DISCOVER] spec 05 community-discovery (draft spec first) — TODO: needs SEARCH_API_KEY unless Gemini's built-in Google Search grounding covers discovery_research; try Gemini grounding first before adding Tavily/separate search API. Also: implement model_settings mapping discovery_research -> Gemini, all other components -> OpenRouter free-tier models.
-- [FEED] spec 06 calendar-scraping (draft spec first)
+- [DISCOVER] spec 05 community-discovery (draft spec first) — read `docs/specs/05-discovery-addendum.md` when drafting. Settled 2026-09-06: Gemini grounding is off the table (quota-blocked, no billing), so discovery uses a search-provider fallback chain Exa -> Tavily -> Serper, all no-card free tiers, plus an explicit multi-round deep-research loop. Needs an Exa key (and Tavily/Serper keys for the fallbacks). The model_settings mapping TODO is done: defaults ship in `lib/llm/catalog.ts` and are seeded on first load.
+- [FEED] spec 06 calendar-scraping (draft spec first) — read `docs/specs/06-scheduled-jobs-addendum.md` when drafting. Settled 2026-09-06: unattended jobs get a model-provider fallback chain Gemini -> OpenRouter free -> Ollama Cloud, no OpenRouter credit purchased.
 - [FEED] spec 07 feed-and-calendar-views (draft spec first)
 - [FEED] spec 08 google-calendar-sync (draft spec first) — TODO: needs GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET (Google Cloud OAuth creds)
-- [LOOP] spec 09 evaluation-and-push (draft spec first) — TODO: needs NEXT_PUBLIC_VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY (web push)
+- [LOOP] spec 09 evaluation-and-push (draft spec first) — TODO: needs NEXT_PUBLIC_VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY (web push). Scheduled parts follow `docs/specs/06-scheduled-jobs-addendum.md`.
 - [LOOP] spec 10 crm (draft spec first)
-- [LOOP] spec 11 weekly-planning-and-invites (draft spec first)
+- [LOOP] spec 11 weekly-planning-and-invites (draft spec first) — scheduled parts follow `docs/specs/06-scheduled-jobs-addendum.md`.
 
 ## Next
-- [SPINE] spec 03 assessment-interview
+- [SPINE] spec 03 assessment-interview — spec drafted 2026-09-06, ready to implement in a fresh session. Carries one housekeeping item: the stale line in `docs/specs/12-professionalize.md` 12b item 4.
 
 ## In Progress
 - (none)
@@ -26,6 +26,8 @@
   - OpenRouter free models sit on a shared upstream pool and return 429 while the key is valid: `z-ai/glm-5.2:free` failed that way and was replaced as the default by `minimax/minimax-m3:free`. Keep more than one free model in mind; any of them can go 429 at any time.
   - Gemini's Google Search grounding is quota-blocked on this key: plain calls return 200 in the same second a grounded call returns 429 RESOURCE_EXHAUSTED. This matters for spec 05, which planned to use grounding instead of a separate search API.
   - Gemini's ListModels advertises models that 404 for new keys (`gemini-2.5-flash`), so dropdowns are built from live lists plus a Test button that makes a real call.
+  - Both findings above are now settled and need no further discussion: grounding and search providers in `docs/specs/05-discovery-addendum.md`, model fallback for unattended jobs in `docs/specs/06-scheduled-jobs-addendum.md`. No billing on any provider; free-tier fallback chains instead.
+  - Key rotation closed out: both rotated keys were exercised with real calls, and the old keys are now deleted.
   - Verified per the CLAUDE.md rule: `next build` passed AND a production server served real authenticated requests. Local `next start` returned 200 for `/settings` and `/assessment` under a real magic-link session, and the deployed https://gazelle-psi.vercel.app returned 200 for `/settings` after the push, with both provider keys picked up from Vercel's environment.
 - Scaffold docs written
 - spec 01 scaffold-and-data-model — done 2026-09-05, tag `spec-01`. Next.js 16 + Tailwind scaffold, PWA shell, Supabase magic-link auth gated in proxy.ts, all 15 tables applied to wqawpwbgrsjusbdopgbi with RLS (security advisors clean), profiles-on-signup trigger, Zod schemas + 60 tests, eight-section app shell. Fully deployed and working end to end.

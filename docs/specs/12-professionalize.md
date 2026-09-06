@@ -13,7 +13,7 @@ Run after spec 11. Goal: make gazelle something you'd show an engineer or employ
 1. Sentry (free tier): error capture on client and server, source maps uploaded on deploy.
 2. Structured logging for scheduled jobs; failures surface in the app UI (already required by CLAUDE.md) and in Sentry.
 3. Rate limiting on API routes and LLM gateway calls per user.
-4. Key rotation: regenerate Supabase secret, OpenRouter, and Gemini keys (they were pasted into chats during setup); update `.env.local` and Vercel. — DONE 2026-09-06: all three keys regenerated, .env.local and Vercel updated, Supabase verified live under auth; OpenRouter and Gemini pending real exercise in spec 02. Old keys not yet deleted.
+4. Key rotation: regenerate Supabase secret, OpenRouter, and Gemini keys (they were pasted into chats during setup); update `.env.local` and Vercel. — DONE 2026-09-06: all three keys regenerated, .env.local and Vercel updated, Supabase verified live under auth; OpenRouter and Gemini both exercised with real calls in spec 02. Old keys deleted.
 5. `/admin` page (user-gated): run_log with cost/latency, scheduled job history, scraper health per community.
 
 ## 12c — Product analytics

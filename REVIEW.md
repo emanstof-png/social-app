@@ -71,27 +71,29 @@ problem.
 
 ## Unsure / decisions needed
 
-- **The Vercel deploy is blocked, and it is not a code problem.** Every
-  push-triggered deployment comes back `failure — "Deployment was blocked"`,
-  which happens before Vercel builds anything. I proved the code is fine by
-  cloning the repo fresh, running `npm ci`, and building with only the two public
-  env vars set: clean build, 14 routes. The pattern is that the one deploy
-  started from the Vercel dashboard succeeded and every git-push deploy since has
-  been blocked. Most likely cause: this repo had no `user.email` set, so all six
-  earlier commits were authored as `ericdesktop@Erics-Mac-mini.local`, a
-  fabricated hostname address, and Vercel blocks pushes whose author is not tied
-  to an account with project access. I have set the repo identity to
-  `Eric Manstof <emanstof@gmail.com>`; the spec-01 commit is the first with the
-  correct author and is the test of that theory.
-  **Action for you:** open
-  https://vercel.com/easyday-outreach/gazelle/4fVvyrnbawiMCnLyqTUcgF8SY9c8
-  and read the stated block reason. If it is a spending or usage limit on the
-  `easyday-outreach` team rather than the git author, my fix does not address it.
-- **Deployment Protection looks enabled.** The deployment URL 302s to Vercel SSO.
-  If that covers production too, then "deployed URL loads" fails for any normal
-  visitor, and it will break the magic-link callback, because that callback hits
-  your domain in a browser that has no Vercel session. Consider setting protection
-  to preview deployments only.
+- **The Vercel build was blocked; that is now fixed.** Every push-triggered
+  deployment was coming back `failure — "Deployment was blocked"`, which happens
+  before Vercel builds anything. The cause was that this repo had no `user.email`
+  set, so all six earlier commits were authored as
+  `ericdesktop@Erics-Mac-mini.local`, a fabricated hostname address, and Vercel
+  blocks pushes whose author is not tied to an account with project access. I set
+  the repo identity to `Eric Manstof <emanstof@gmail.com>`, and the first commit
+  with the correct author deployed successfully. Nothing further needed here.
+- **The app still is not publicly reachable. Two dashboard settings, both yours.**
+  1. **Deployment Protection is on.** Both
+     https://gazelle-hxbw4taop-easyday-outreach.vercel.app and
+     `gazelle-easyday-outreach.vercel.app` 302 to Vercel SSO. That fails the
+     "deployed URL loads" acceptance criterion for any normal visitor, and it will
+     break the magic-link callback, because the callback hits your domain in a
+     browser with no Vercel session. Set protection to preview deployments only.
+  2. **`gazelle-psi.vercel.app` returns 404 and is not serving this project.** The
+     Supabase redirect URL you configured for it therefore points nowhere. Find
+     the real production alias in the Vercel dashboard and update Supabase
+     Auth → URL Configuration to match it. (`gazelle.vercel.app` resolves to an
+     unrelated project, not yours — do not use it.)
+
+  Because of these, scope item 5 is half done: `npm run dev` works locally and is
+  verified, the deploy builds, but I could not confirm the deployed URL loads.
 - **`onboarding_state` has no enum.** ARCHITECTURE.md names the field but no
   values, so it is plain text defaulting to `'new'`. Spec 03 should pin the
   values down and I will add a migration converting it to an enum.
@@ -130,7 +132,8 @@ Spec 02 is the LLM gateway and model settings.
   set and ready either way.
 - **Keys:** nothing new. No Anthropic key is present, by your earlier decision, so
   the `anthropic` provider will exist in the enum but be unusable until one is added.
-- **Carry over:** confirm the Vercel block is cleared, and confirm the `profiles`
-  row appeared after your first sign-in.
+- **Carry over:** turn off production Deployment Protection, point Supabase's
+  redirect URLs at the real production alias, and confirm the `profiles` row
+  appeared after your first sign-in.
 - Vitest is set up, so spec 02's gateway tests have somewhere to live. CLAUDE.md
   wants those red before green.

@@ -18,7 +18,7 @@
 - (none)
 
 ## Blocked
-- Vercel production deploy — every git-push deploy returns "Deployment was blocked" (pre-build, not a build failure; a clean clone builds fine). Likely cause: commits before spec-01 were authored as ericdesktop@Erics-Mac-mini.local because the repo had no user.email; Vercel blocks pushes whose author is not tied to an account with project access. Repo identity now set to emanstof@gmail.com and the spec-01 commit tests it. TODO: read the block reason at https://vercel.com/easyday-outreach/gazelle/4fVvyrnbawiMCnLyqTUcgF8SY9c8 and check whether Deployment Protection covers production, since SSO on production would break the magic-link callback.
+- Vercel public access — the build is FIXED and deploying (commit fe82e17 succeeded; the earlier "Deployment was blocked" runs were caused by commits authored as ericdesktop@Erics-Mac-mini.local, since the repo had no user.email. Repo identity is now emanstof@gmail.com). Two dashboard settings still stop the app being reachable, both need Eric: (1) Deployment Protection is ON — https://gazelle-hxbw4taop-easyday-outreach.vercel.app and gazelle-easyday-outreach.vercel.app both 302 to Vercel SSO, which fails "deployed URL loads" and will break the magic-link callback, since that callback hits the domain in a browser with no Vercel session. Set protection to preview-only. (2) gazelle-psi.vercel.app returns 404 and is not serving this project, so the Supabase redirect URL configured for it points nowhere. Find the real production alias in the Vercel dashboard and update Supabase Auth → URL Configuration to match.
 
 ## Done
 - Scaffold docs written

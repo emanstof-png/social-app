@@ -15,12 +15,18 @@
 - [SPINE] spec 03 assessment-interview
 
 ## In Progress
-- [SPINE] spec 02 llm-gateway-and-model-settings — started 2026-09-06. Defaults wired per the old TODO: discovery_research on Gemini, all other components on an OpenRouter free-tier model, user-editable per PRD §5.
+- (none)
 
 ## Blocked
 - (none)
 
 ## Done
+- spec 02 llm-gateway-and-model-settings — done 2026-09-06, tag `spec-02`. Gateway is the single entry point for every model call: resolves the model from `model_settings`, decrypts the key from `provider_keys` (env var as fallback), calls the provider, validates against the component's Zod output schema, retries once on invalid output, writes one `run_log` row per run whether it succeeds or fails. Settings page has provider keys, live per-component model dropdowns with a tools badge, run log with filters and cost/latency, and rerun-with-another-model side by side. Model setup is onboarding step 1 and gates `/assessment`. Migration 0005 added provider/status/error_kind/error_message/attempts/rerun_of to `run_log`.
+  - Both rotated keys exercised with real API calls, not just auth checks. OpenRouter and Gemini each ran persona_synthesis end to end and wrote a real `run_log` row.
+  - OpenRouter free models sit on a shared upstream pool and return 429 while the key is valid: `z-ai/glm-5.2:free` failed that way and was replaced as the default by `minimax/minimax-m3:free`. Keep more than one free model in mind; any of them can go 429 at any time.
+  - Gemini's Google Search grounding is quota-blocked on this key: plain calls return 200 in the same second a grounded call returns 429 RESOURCE_EXHAUSTED. This matters for spec 05, which planned to use grounding instead of a separate search API.
+  - Gemini's ListModels advertises models that 404 for new keys (`gemini-2.5-flash`), so dropdowns are built from live lists plus a Test button that makes a real call.
+  - Verified per the CLAUDE.md rule: `next build` passed AND a production `next start` served `/settings` and `/assessment` at HTTP 200 under a real magic-link session.
 - Scaffold docs written
 - spec 01 scaffold-and-data-model — done 2026-09-05, tag `spec-01`. Next.js 16 + Tailwind scaffold, PWA shell, Supabase magic-link auth gated in proxy.ts, all 15 tables applied to wqawpwbgrsjusbdopgbi with RLS (security advisors clean), profiles-on-signup trigger, Zod schemas + 60 tests, eight-section app shell. Fully deployed and working end to end.
   - Vercel settings Eric changed to unblock the deploy: build preset switched to Next.js, and Deployment Protection turned off so the production URL is publicly reachable (SSO on production would also have broken the magic-link callback, which hits the domain in a browser with no Vercel session).

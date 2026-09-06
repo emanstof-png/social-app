@@ -16,7 +16,22 @@ Paste ONE at a time. Each spec file in docs/specs/ has scope, acceptance criteri
 | 10 | crm | PRD §4.1–4.3, 4.5 (contacts, import, met-where, tallies, compose-and-send via phone) | Sonnet | 1–2 |
 | 11 | weekly-planning-and-invites | PRD §3.5–3.6, §4.4, 4.6 (weekly plan from feed, ongoing discovery job, invite suggestions, group-invite suggestion) | Sonnet | 1–2 |
 
-**Out of order: 12a ran on 2026-09-06, between spec 02 and spec 03.** Spec 12 is written as post-build professionalization, but 12a is quality gates — CI, an end-to-end login test and a pre-commit hook. Those are worth more guarding specs 03–11 as they are written than auditing them once they are finished, and spec 01 had already shipped a production-only bug (`NAV_ITEMS`) that a gate would have caught. Only 12a moved; 12b–12e stay after spec 11. Within 12a, items 2 (assessment and event-selection tests) and 3 (Lighthouse CI) are deferred because the pages they would test do not exist yet — see `docs/specs/12-professionalize.md`.
+## Actual build order so far
+`00 → 01 → 02 → 12a (pulled forward) → 03`. The table above is the plan; this is what was run.
+
+**Out of order: 12a ran on 2026-09-06, between spec 02 and spec 03.** Spec 12 is written as post-build professionalization, but 12a is quality gates — CI, an end-to-end login test and a pre-commit hook. Those are worth more guarding specs 03–11 as they are written than auditing them once they are finished, and spec 01 had already shipped a production-only bug (`NAV_ITEMS`) that a gate would have caught. Only 12a moved; 12b–12e stay after spec 11. Within 12a, items 2 (assessment and event-selection tests) and 3 (Lighthouse CI) are deferred because the pages they would test do not exist yet — see `docs/specs/12-professionalize.md`. Spec 03 has now built the assessment flow, so 12a item 2's assessment test is unblocked and waiting to be written; event selection still waits for spec 07.
+
+Spec 03 finished on 2026-09-06 (tag `spec-03`). Next is spec 04.
+
+## Addenda waiting for the specs that have not been drafted yet
+Two decisions were settled during spec 02 that change what specs 05 and 06 must say. Read the addendum **before** drafting either spec; each one overrides the one-line description in the table above.
+
+| Spec | Addendum | What it settles |
+|------|----------|-----------------|
+| 05 community-discovery | `docs/specs/05-discovery-addendum.md` | Gemini's Google Search grounding is quota-blocked on this key, so discovery uses a search-provider fallback chain (Exa → Tavily → Serper, all no-card free tiers) plus an explicit multi-round deep-research loop. Needs an Exa key. |
+| 06 calendar-scraping | `docs/specs/06-scheduled-jobs-addendum.md` | Unattended jobs get a model-provider fallback chain (Gemini → OpenRouter free → Ollama Cloud). No OpenRouter credit is being bought, and free models return 429 at any time. |
+
+`docs/specs/10-crm-addition-note.md` is a smaller note of the same kind for spec 10.
 
 **Afternoon-one target:** specs 01–04. App is usable for assessment + activity selection that evening.
 **Usable-daily target:** through spec 07.

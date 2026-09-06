@@ -16,6 +16,8 @@ Paste ONE at a time. Each spec file in docs/specs/ has scope, acceptance criteri
 | 10 | crm | PRD §4.1–4.3, 4.5 (contacts, import, met-where, tallies, compose-and-send via phone) | Sonnet | 1–2 |
 | 11 | weekly-planning-and-invites | PRD §3.5–3.6, §4.4, 4.6 (weekly plan from feed, ongoing discovery job, invite suggestions, group-invite suggestion) | Sonnet | 1–2 |
 
+**Out of order: 12a ran on 2026-09-06, between spec 02 and spec 03.** Spec 12 is written as post-build professionalization, but 12a is quality gates — CI, an end-to-end login test and a pre-commit hook. Those are worth more guarding specs 03–11 as they are written than auditing them once they are finished, and spec 01 had already shipped a production-only bug (`NAV_ITEMS`) that a gate would have caught. Only 12a moved; 12b–12e stay after spec 11. Within 12a, items 2 (assessment and event-selection tests) and 3 (Lighthouse CI) are deferred because the pages they would test do not exist yet — see `docs/specs/12-professionalize.md`.
+
 **Afternoon-one target:** specs 01–04. App is usable for assessment + activity selection that evening.
 **Usable-daily target:** through spec 07.
 **Full spec:** through spec 11.

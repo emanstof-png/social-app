@@ -1,226 +1,241 @@
-# REVIEW — spec 02, LLM gateway and model settings
+# REVIEW — spec 12a, quality gates
 
-Spec: `docs/specs/02-llm-gateway-and-model-settings.md`. Tag `spec-02`.
-Date: 2026-09-06.
+Spec: `docs/specs/12-professionalize.md`, section **12a — Quality gates**.
+Pulled forward out of order, run between spec 02 and spec 03 instead of after
+spec 11. Tag `spec-12a`.
 
-Also in this session, before spec 02: two orphaned planning docs were committed
-(`docs/specs/12-professionalize.md`, `docs/specs/10-crm-addition-note.md`) as a
-single docs-only commit, `145be68`.
+---
+
+## THE ONE THING I NEED FROM YOU
+
+The Playwright CI job currently **skips itself** — green, with a log line —
+because the repository has no Supabase secrets. Add these four and it starts
+running the login test on every push. You can do this from your phone.
+
+GitHub → repo **emanstof-png/social-app** → **Settings** → **Secrets and
+variables** → **Actions** → **New repository secret**, four times:
+
+| Secret name | Value |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | same value as in `.env.local` |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | same value as in `.env.local` |
+| `SUPABASE_SERVICE_ROLE_KEY` | same value as in `.env.local` |
+| `ENCRYPTION_KEY` | same value as in `.env.local` |
+
+Names must match exactly. No provider keys (`OPENROUTER_API_KEY`,
+`GEMINI_API_KEY`) are needed — the login test never calls a model, and CI must
+not spend API quota.
+
+I did not read, print or log any secret value at any point. The workflow echoes
+secret *names* only, and only when they are missing.
+
+**Before you add them, read "One decision I made for you" below** — the test
+creates a dedicated auth user in your real Supabase project.
 
 ---
 
 ## What was built
 
-**1. The gateway (`lib/llm/gateway.ts`)**
-The single entry point for every model call. Deterministic-first: the code owns
-the workflow, the model only fills the "JSON in, JSON out" joint.
+### 1. GitHub Actions — DONE
+`.github/workflows/ci.yml`, job **lint, tsc, vitest**. Runs on every push and
+every pull request. Three steps, any failure fails the build:
 
-Per call it resolves the model from `model_settings`, decrypts the key from
-`provider_keys` (falling back to the environment variable), calls the provider,
-parses JSON out of the reply, validates it against the component's Zod output
-schema, retries once with a corrective message if that fails, and writes exactly
-one `run_log` row whether it succeeded or failed.
+- `npm run lint` → eslint
+- `npm run typecheck` → `next typegen && tsc --noEmit`
+- `npm test` → vitest (105 tests; the live-provider tests skip themselves
+  unless `GAZELLE_LIVE_TEST=1`, so CI never spends API quota)
 
-Only malformed output is retried. Auth failures, quota walls and timeouts are
-not, because they fail identically the second time and would just burn a
-request.
+Badge added to `README.md`, pointing at this workflow.
 
-**2. Providers (`lib/llm/providers.ts`)**
-One OpenAI-compatible adapter covering OpenRouter, Groq and local
-(Ollama / LM Studio), plus Gemini and Anthropic adapters. No new dependencies:
-all three speak plain `fetch`.
+### 2. Playwright, login flow only — DONE
+`playwright.config.ts` and `e2e/login.spec.ts`. Two tests:
 
-**3. Component registry (`lib/llm/components/`)**
-One file per component with input schema, output schema, a stub system prompt
-and a sample input. Real prompts arrive with the specs that use them.
+- **Signed out, a gated route redirects to `/login`** — `/settings` bounces to
+  `/login?next=%2Fsettings` and the magic-link form is there.
+- **The magic-link callback signs in and `/settings` renders** — the admin API
+  mints a magic link, its `hashed_token` is driven through the app's own
+  `/auth/callback` route (the technique spec 02 used to verify the deployed
+  URL), and then: HTTP 200, URL is `/settings`, and all four real headings
+  render — `Settings`, `Provider keys`, `Models per component`, `Run log`.
+  Finally `/login` is visited again and bounces home, proving the session
+  cookie actually stuck.
 
-**4. Settings page**
-- Provider keys, AES-256-GCM encrypted before they reach Supabase. Plaintext
-  never returns to the browser. A stored key overrides the env var.
-- Per-component provider + model dropdowns with a filter box and a
-  "supports tools" badge. `discovery_research` lists only tool-capable models.
-- Run log: filter by component and status, cost/latency/tokens/attempts, expand
-  to see input and output, and rerun on another model with the two outputs side
-  by side.
-- Test button (raw connectivity check) and Sample run button (full gateway run).
+It runs against `next build` + `next start`. Not the dev server — CLAUDE.md's
+"verified" rule exists because spec 01 shipped code that built cleanly and
+500'd in production under auth, and a dev-server test would not have caught it.
 
-**5. Onboarding**
-Model setup is step 1. `/assessment` shows a gate with a link to Settings until
-every component has a model.
+Assessment and event-selection tests are **deferred**; see below.
 
-**6. Migration 0005**
-`run_log` gained `provider`, `status`, `error_kind`, `error_message`,
-`attempts`, `rerun_of`. Spec 01's shape could describe a successful call but not
-a failed one, and both of this spec's acceptance criteria need more than that.
-Applied to `wqawpwbgrsjusbdopgbi` and verified.
+### 3. Lighthouse CI — DEFERRED, as you instructed.
+
+### 4. Pre-commit hook — DONE
+husky + lint-staged. `.husky/pre-commit` runs:
+
+- `npx lint-staged` → `eslint --fix` on staged `.ts/.tsx/.mts/.mjs` only
+- `npm run typecheck` → eslint does not type-check, and tsc needs the whole
+  program rather than the staged subset
+- `npm test`
+
+About 12 seconds. `git commit --no-verify` bypasses it in an emergency.
+
+### 5. Docs — DONE
+- `docs/specs/12-professionalize.md`: 12a marked "In progress, pulled forward
+  2026-09-06" at the top of the section; items 2 and 3 marked deferred with
+  their reasons; items 1 and 4 marked done.
+- `docs/BUILD_PHASES.md`: a paragraph on why 12a ran ahead of spec 03 and that
+  only 12a moved.
+- `STATUS.md`: Done entry with the same record, plus the secrets you need to
+  add. The Next entry for spec 03 now carries a reminder to add the assessment
+  e2e test when that flow exists.
+- `CHANGELOG.md`: one line for spec-12a.
+- `README.md`: badge and a short "Quality gates" section.
 
 ---
 
 ## How to test it by hand
 
-1. `npm run dev`, open http://localhost:3000/settings while signed in.
-2. **Provider keys.** OpenRouter and Gemini should show "using
-   OPENROUTER_API_KEY" / "using GEMINI_API_KEY" (picked up from `.env.local`).
-   The other three show "not configured". Paste any string into OpenRouter's key
-   box and Save: the badge flips to "key stored". Press Remove to go back to the
-   env var.
-3. **Dropdowns.** Every component should already have a model (defaults are
-   seeded on first load). Change Interview's model, press Save.
-4. **Tool filtering.** On "Discovery research", note the "needs tool support"
-   badge and that every option in its list is marked `· tools`. Other components
-   list models with and without.
-5. **Test.** Pick a model, press Test. It makes a real call and reports the
-   latency and token counts, or the actual provider error.
-6. **Sample run → acceptance criterion 1.** Press "Sample run" on Persona
-   synthesis. Scroll to the run log: the newest row names the model you chose.
-   Change the dropdown to a different model, Save, Sample run again: the next
-   row names the new model. That is the dropdown changing which model the next
-   call uses, verified in `run_log`.
-7. **Acceptance criterion 3.** Expand any successful run, choose a different
-   provider and model at the bottom, press "Rerun with model". The row expands
-   into two panes, the original output and the rerun's, for the same input.
-8. **Acceptance criterion 2.** Covered by tests rather than by hand, since it
-   needs a model that returns bad JSON on demand: `tests/gateway.test.ts`
-   asserts one retry then a logged error with `status: error`,
-   `error_kind: schema`, `attempts: 2`. It also happened for real during this
-   session, see the run log rows for `minimax/minimax-m3:free`.
-9. **Onboarding gate.** Visit `/assessment`. If `onboarding_state` is still
-   `new` you get the gate. Press "Model setup is done" on Settings, revisit.
-10. **Tests.** `npm test` runs 105 tests. The live tests are skipped by default;
-    run them with `GAZELLE_LIVE_TEST=1 npx vitest run tests/live-gateway.test.ts`
-    (spends real quota, writes real `run_log` rows).
+**CI (from your phone).** Open
+https://github.com/emanstof-png/social-app/actions — the newest run on `main`
+should be a green **CI**. Two jobs: "lint, tsc, vitest" green, "Playwright
+(login flow)" green with the first step logging
+`SKIPPING Playwright: repository secrets not set: ...`. After you add the four
+secrets, push anything (or re-run the workflow) and that job should build and
+run the two tests instead of skipping.
+
+**The gates locally.**
+```
+npm run lint
+npm run typecheck
+npm test
+```
+All three should be silent/green.
+
+**The end-to-end test locally.**
+```
+npm run test:e2e
+```
+Builds, starts a production server on :3000, runs both tests. Expect
+`2 passed`. On failure, `npx playwright show-report` opens a trace.
+
+**The pre-commit hook.** Prove it blocks bad code:
+```
+echo 'export const x: number = "nope";' > lib/probe.ts
+git add lib/probe.ts
+git commit -m "should be refused"
+```
+Expect `error TS2322` and `husky - pre-commit script failed (code 2)`, and
+`git log --oneline -1` unchanged. Then clean up:
+```
+git restore --staged lib/probe.ts && rm lib/probe.ts
+```
 
 ---
 
 ## Verified, and what that means
 
-Per the CLAUDE.md rule, "verified" is not `next build` passing:
+Per the CLAUDE.md rule, being explicit about which of the two happened:
 
-- `next build` passes, `tsc --noEmit` clean, `eslint` clean, 105 tests pass.
-- **A production server was exercised under real authentication, twice.**
-  Signed in through the actual magic-link flow both times (admin
-  `generate_link` → the real `/auth/callback` route → session cookie):
-  - Local `next start` on a built bundle: `GET /settings` **200** with all
-    sections rendered, `GET /assessment` **200** showing the onboarding gate.
-  - **The deployed URL** https://gazelle-psi.vercel.app after the push:
-    `GET /settings` **200**, 359KB, all sections, the new default model
-    present, and both `OPENROUTER_API_KEY` and `GEMINI_API_KEY` detected from
-    Vercel's environment. No 500, no client-boundary error.
-- **The rotated keys were exercised with real API calls**, not just auth pings.
-  OpenRouter and Gemini each ran `persona_synthesis` end to end and wrote a real
-  `run_log` row, and a rerun linked back to its original.
+- **Locally: the full thing.** `next build` succeeded AND a production server
+  (`next start`) served a real authenticated request — a real magic-link
+  session through the real `/auth/callback` — and `/settings` returned 200
+  with its actual sections rendered. That is the strong sense of verified, and
+  it is now an automated test rather than a one-off check.
+- **In CI: lint, tsc and vitest only.** Green on `main`, run 34044270486. The
+  production-server-under-auth half has **not** run in CI yet, because the
+  Playwright job is skipped until the four secrets exist. Once you add them,
+  CI does the strong check on every push.
+- **The deployed URL was not re-exercised this session.** Nothing in spec 12a
+  changes application code — no route, component or library file was touched —
+  so the deployment is byte-for-byte what spec 02 verified. Every change is CI
+  config, test files, tooling config and docs.
 
 ---
 
 ## Two fixes made during the session
 
-**1. The default OpenRouter model did not work.**
-`z-ai/glm-5.2:free` returned 429 "temporarily rate-limited upstream" from
-OpenRouter's shared free pool. The key was valid: three other free models
-answered in the same second. Default moved to `minimax/minimax-m3:free`, and the
-fallback list reordered by what actually answered.
+**1. The first CI run failed, and it was a real gap.**
+`tsc --noEmit` failed on a clean checkout with `Cannot find name 'LayoutProps'`
+and `Cannot find name 'PageProps'`. Next generates those global types into
+`.next/types` during a build, so they exist on my machine and on nobody's
+fresh clone. `npm run typecheck` now runs `next typegen` first. This is
+precisely the class of bug the gate was added to catch, on its first run.
 
-**2. Prompts described no schema.**
-The instruction said the reply "must match the schema described above" while
-nothing in the prompt described it. Free models duly omitted required keys:
-`minimax/minimax-m3:free` dropped `goals` from `persona_synthesis` on both the
-first attempt and the retry. The output schema is now derived from the Zod
-schema with `z.toJSONSchema()` and included in the system prompt, so the object
-the model is shown is exactly the one its reply is validated against. After this
-both providers succeeded on the first attempt.
+**2. The e2e suite pointed at the wrong hostname.**
+I first set the base URL to `127.0.0.1`. The login test failed: the callback
+succeeded, then the app bounced straight back to `/login`. Next builds the URL
+it redirects to from its own base, which is `localhost` — so the session cookie
+was set on `127.0.0.1` and read on `localhost`, two different cookie hosts, and
+vanished. It looks exactly like broken auth. Base URL is now `localhost`, with
+a comment saying why.
 
 Both were in-scope defects in this spec's own work, self-fixed and re-verified.
 
 ---
 
-## What I was unsure about, and decisions I made
+## One decision I made for you
 
-- **`run_log` needed new columns.** Not in the spec's wording, but its
-  acceptance criteria require logging a failure and replaying an input, and
-  spec 01's `run_log` could do neither. Migration 0005 rather than working
-  around it. Flagging because it changes a spec 01 table.
-- **`input_ref` / `output_ref` hold JSON inline**, not a pointer to storage
-  despite the `_ref` name. The rerun comparison needs the original input to
-  replay and both outputs to display. Payloads are small today. This may want
-  revisiting when `event_extraction` starts storing whole scraped pages.
-- **I added a "Sample run" button, which the spec does not list.** Spec 02
-  builds the gateway but nothing that calls it, so there was no way to create a
-  `run_log` row, and acceptance criteria 1 and 3 could not have been checked
-  until spec 03. If you would rather it not ship, it is one button and one
-  action to delete. **This is the one place I went beyond the written scope.**
-- **`tests/migration-sql.ts` was changed.** It read only `0002_tables.sql`, so
-  it was blind to columns added by any later migration. It now replays every
-  migration in filename order. This strengthens the check rather than weakening
-  it, and no assertion was relaxed. Calling it out because CLAUDE.md says never
-  edit a test to make it pass; this was the test helper's coverage being wrong,
-  and the two new enums were then registered in `tests/schemas.test.ts` because
-  the stronger parser correctly demanded them.
-- **`eslint.config.mjs` gained `argsIgnorePattern: "^_"`.** `useActionState`
-  hands every server action `(prevState, formData)` whether it reads them or
-  not. The codebase already used the `_` prefix convention; the linter now
-  honours it.
-- **Model dropdowns are built from live provider lists**, not a hardcoded
-  catalogue, with a short fallback when the fetch fails. A hardcoded list goes
-  stale silently, which is exactly what bit Gemini below.
+**The e2e test creates a user in your real Supabase project.**
+`e2e+gazelle@example.com`, made once via the admin API and reused thereafter
+(idempotent — re-running never makes a second one). It is not deleted, per
+CLAUDE.md's never-delete rule. The reason is that the login flow cannot be
+tested without an account, and using your real account would mean CI runs
+touching your real data.
+
+Consequences, so nothing surprises you: your Supabase project will show a
+second auth user and a second `profiles` row once the CI job runs, and each CI
+run adds a login for it. If you would rather this pointed at a separate
+Supabase project, that is spec 12d item 4 (staging environment) and the test
+already reads `E2E_TEST_EMAIL` and the standard Supabase variables, so it
+moves with no code change.
+
+If you would rather it not exist at all, don't add the secrets — the job stays
+skipped and green, and the test still runs locally whenever you want it.
 
 ---
 
-## Things you should know
+## What I was unsure about
 
-**Gemini's Google Search grounding is quota-blocked on this key.** A plain
-`generateContent` returns 200 in the same second that the same call with
-`tools: [{google_search: {}}]` returns 429 RESOURCE_EXHAUSTED. Reproducible, not
-a transient blip. **This matters for spec 05**, which planned to try Gemini
-grounding before adding Tavily or a separate search API (STATUS.md backlog).
-As things stand grounding is not usable on the free tier, so spec 05 will
-probably need billing enabled on the Google Cloud project or a separate search
-API after all. Worth resolving before spec 05 is drafted.
+**Running straight through.** CLAUDE.md's checkpoint discipline says to stop
+after each numbered Scope item and wait for "continue". You explicitly
+instructed me to run straight through because you were away from the keyboard,
+so I did. Flagging it because the rule is otherwise absolute.
 
-**OpenRouter free models are unreliable by design.** They run on a shared
-upstream pool and any of them can return 429 at any moment while the key is
-perfectly valid. Six of the seven components default to one. Not a problem for
-the assessment, which is interactive and can be retried, but the scheduled jobs
-in specs 06 and 11 will need a fallback model or a paid model.
+**Three new dependencies.** `@playwright/test`, `husky`, `lint-staged` — all
+three are named in the spec text itself, so I treated the spec as the approval
+CLAUDE.md's "flag before adding" rule asks for. All are devDependencies; none
+ship to the browser. Nothing else was added: the Playwright config loads
+`.env.local` through `@next/env`, which already ships inside `next`.
 
-**Gemini's model list lies.** `ListModels` advertises `gemini-2.5-flash`, and
-calling it returns 404 "no longer available to new users, use
-models/gemini-3.6-flash". So a model appearing in a dropdown is not proof it
-works; that is what the Test button is for.
+**Whether the pre-commit hook should run the full test suite.** It adds ~12
+seconds to every commit. I included it because the suite is fast today and
+because `tests/client-boundary.test.ts` is the guard against the exact
+production-only bug that hit spec 01 — that one is worth paying for. If it
+becomes annoying as the suite grows, drop `npm test` from `.husky/pre-commit`
+and let CI carry it.
 
-**The Settings page is heavy: ~360KB of HTML.** OpenRouter lists 300+ models and
-each of the seven component dropdowns renders all the eligible ones. It renders
-in well under a second locally, but this is a mobile PWA and that is worth
-trimming if it becomes noticeable.
-
-**Anthropic and Groq are implemented but never exercised.** No keys for either.
-The adapters are written from their documented APIs and are unproven.
-
-**No rate limiting on the gateway.** Spec 12b item 3 covers it.
-
-**Note on `docs/specs/12-professionalize.md`:** the line I appended to 12b item 4
-says OpenRouter and Gemini are "pending real exercise in spec 02". That is now
-done, as of this session. You may want to update that line. Old keys are still
-not deleted.
+**`on: push` with no branch filter.** Every branch gets a CI run, and pushing
+to a PR branch triggers both events. I added a `concurrency` group to cancel
+superseded runs rather than filtering branches, since the spec says "every push
+and PR". Free tier minutes are ample at this size.
 
 ---
 
 ## What the next spec needs
 
-Spec 03 (assessment interview) can now assume:
+Spec 03 (assessment-interview) is next and needs nothing from this work to
+start. Two things to carry forward:
 
-- `runComponent("interview", input)` and `runComponent("persona_synthesis",
-  input)` work, validate their output, and log themselves. Import from
-  `lib/llm/gateway-server`, never a provider directly.
-- Both components already have input and output schemas in
-  `lib/llm/components/`. **Their system prompts are stubs** and are spec 03's
-  job to write. Do not ship the stubs.
-- `profiles.onboarding_state` is `models_configured` once Settings is done.
-  Spec 03 should advance it to `assessment_started` then `assessment_complete`
-  using `advanceOnboarding` in `lib/onboarding.ts`.
-- Per PRD §1.3, every answer is written to `assessment_answers` as it is given,
-  not batched at the end.
-- Interview output currently returns one question at a time with a
-  `more_to_ask` flag. Change the schema if that shape does not suit; nothing
-  depends on it yet.
+1. **Add the assessment e2e test when the flow exists** (12a item 2, deferred).
+   The harness is in place: drop a new file in `e2e/`, reuse the magic-link
+   helpers in `e2e/login.spec.ts`, and CI picks it up with no workflow change.
+   Same for event selection after spec 07.
+2. **CI is now a real gate.** From here on, a push that fails lint, tsc or the
+   tests goes red on `main`. Same three commands run pre-commit, so it should
+   rarely be a surprise.
 
-Before spec 05, settle the Gemini grounding question above.
+Still open from spec 02, unchanged by this session: the stale line in
+`docs/specs/12-professionalize.md` 12b item 4 about key rotation.
+
+---
+
+Review gate: open your planning chat and paste REVIEW.md.

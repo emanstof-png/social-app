@@ -10,7 +10,11 @@
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "next build && playwright test"
+    "test:e2e": "next build && playwright test",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,mts,mjs}": "eslint --fix --no-warn-ignored"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.6",

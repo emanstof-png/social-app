@@ -1,0 +1,15 @@
+# Spec 12a item 4 — the same gates CI runs, before the commit exists.
+#
+# `set -e` matters: without it the hook's exit code is only the last command's,
+# so a lint or type failure would let the commit through.
+set -e
+
+# eslint --fix on the staged files only; lint-staged re-stages what it fixes.
+npx lint-staged
+
+# eslint does not type-check, and tsc needs the whole program, not the staged
+# subset. Both of these are seconds, not minutes.
+npm run typecheck
+npm test
+
+# In a genuine emergency: git commit --no-verify

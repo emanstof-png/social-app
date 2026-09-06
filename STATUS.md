@@ -9,7 +9,7 @@ Their values are the ones already in `.env.local`. Until they are set, no end-to
 **Addenda waiting to be read when their spec is drafted:** `docs/specs/05-discovery-addendum.md` (spec 05) and `docs/specs/06-scheduled-jobs-addendum.md` (spec 06). Both settle decisions made during spec 02 and override the one-line descriptions in `docs/BUILD_PHASES.md`. `docs/specs/10-crm-addition-note.md` is a smaller note of the same kind for spec 10.
 
 ## Backlog
-- [DISCOVER] spec 05 community-discovery (draft spec first) — read `docs/specs/05-discovery-addendum.md` when drafting. Settled 2026-09-06: Gemini grounding is off the table (quota-blocked, no billing), so discovery uses a search-provider fallback chain Exa -> Tavily -> Serper, all no-card free tiers, plus an explicit multi-round deep-research loop. Needs an Exa key (and Tavily/Serper keys for the fallbacks). The model_settings mapping TODO is done: defaults ship in `lib/llm/catalog.ts` and are seeded on first load.
+- [DISCOVER] spec 05 community-discovery — **spec drafted and approved 2026-09-06, `docs/specs/05-community-discovery.md`. Not started: blocked on the Exa key (see Blocked).** The addendum it was drafted from is `docs/specs/05-discovery-addendum.md`.
 - [FEED] spec 06 calendar-scraping (draft spec first) — read `docs/specs/06-scheduled-jobs-addendum.md` when drafting. Settled 2026-09-06: unattended jobs get a model-provider fallback chain Gemini -> OpenRouter free -> Ollama Cloud, no OpenRouter credit purchased.
 - [FEED] spec 07 feed-and-calendar-views (draft spec first)
 - [FEED] spec 08 google-calendar-sync (draft spec first) — TODO: needs GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET (Google Cloud OAuth creds)
@@ -18,14 +18,19 @@ Their values are the ones already in `.env.local`. Until they are set, no end-to
 - [LOOP] spec 11 weekly-planning-and-invites (draft spec first) — scheduled parts follow `docs/specs/06-scheduled-jobs-addendum.md`.
 
 ## Next
-- [DISCOVER] spec 05 community-discovery — draft the spec first, reading `docs/specs/05-discovery-addendum.md`. It searches against the focus set spec 04 built: the activities with `status = 'active'` and `kind = 'recurring_community'`, capped at `profiles.focus_cap`. `onboarding_state` reaching `activities_selected` is the signal that a focus set exists.
+- [DISCOVER] spec 05 community-discovery — **the spec is written and approved: `docs/specs/05-community-discovery.md`.** Implementation starts once the Exa key exists. It searches against the focus set spec 04 built: the activities with `status = 'active'` and `kind = 'recurring_community'`, capped at `profiles.focus_cap`. `onboarding_state` reaching `activities_selected` is the signal that a focus set exists.
 - 12a item 2: assessment test DONE (spec 04 item 6, `e2e/assessment.spec.ts`). Event selection still waits for spec 07.
 
 ## In Progress
 - (none)
 
 ## Blocked
-- (none)
+- **spec 05 implementation — waiting on search API keys (Eric, 2026-09-06).** Nothing in the spec can be verified without at least one live search provider, so the build does not start until `EXA_API_KEY` exists. Three no-card free tiers, full instructions at the top of `docs/specs/05-community-discovery.md`:
+  - **Exa** (primary, required to start) — exa.ai → dashboard → API Keys → `EXA_API_KEY`
+  - **Tavily** (secondary, can come later) — tavily.com → app.tavily.com → API Keys → `TAVILY_API_KEY`
+  - **Serper** (tertiary, can come later) — serper.dev → dashboard → API Key → `SERPER_API_KEY`
+
+  Each goes in `.env.local` **and** Vercel → `gazelle` → Environment Variables, Production and Preview. Not GitHub secrets: every test in spec 05 is fixture-based with no network. The chain skips any provider with no key, so Exa alone unblocks the build.
 
 ## Done
 - spec 04 activity-selection — done 2026-09-06, tag `spec-04`. All six scope items. The persona is now a short, committed list of activities with a focus set spec 05 can search against.

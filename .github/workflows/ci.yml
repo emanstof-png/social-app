@@ -1,0 +1,38 @@
+name: CI
+
+# Spec 12a item 1: every push and every pull request runs lint, tsc and the
+# unit tests. Any failure fails the build.
+on:
+  push:
+  pull_request:
+
+# A push to a PR branch triggers both events; keep only the newest run per ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: lint, tsc, vitest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # The live provider tests skip themselves unless GAZELLE_LIVE_TEST=1, so
+      # CI never spends API quota. Everything else runs with no secrets.
+      - name: Unit tests
+        run: npm test

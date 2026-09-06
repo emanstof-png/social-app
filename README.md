@@ -1,4 +1,7 @@
 # gazelle
+
+[![CI](https://github.com/emanstof-png/social-app/actions/workflows/ci.yml/badge.svg)](https://github.com/emanstof-png/social-app/actions/workflows/ci.yml)
+
 A hand-guided web app for building a social life: assess → focus → discover communities → scrape calendars → pick events → evaluate → CRM → plan weekly.
 
 ## How this repo is run

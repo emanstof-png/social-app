@@ -12,11 +12,10 @@
 - [LOOP] spec 11 weekly-planning-and-invites (draft spec first)
 
 ## Next
-- [SPINE] spec 01 scaffold-and-data-model
 - [SPINE] spec 02 llm-gateway-and-model-settings — TODO: wire up model_settings so discovery_research uses Gemini and all other components use OpenRouter free-tier models by default (user-editable per PRD)
 
 ## In Progress
-- (none)
+- [SPINE] spec 01 scaffold-and-data-model — started 2026-09-05
 
 ## Blocked
 - (none)

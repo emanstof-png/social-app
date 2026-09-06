@@ -5,7 +5,7 @@ Run after spec 11. Goal: make gazelle something you'd show an engineer or employ
 **In progress, pulled forward 2026-09-06** — run ahead of spec 03 rather than after spec 11, because these gates protect specs 03–11 as they land rather than auditing them afterwards.
 
 1. GitHub Actions workflow: on every push and PR run `lint`, `tsc`, and tests. Fail the build on any failure. Add status badge to README. — DONE 2026-09-06.
-2. Playwright end-to-end tests for the three core flows: login, complete assessment, select an event. Run in CI. — **Login DONE 2026-09-06. Assessment and event-selection DEFERRED**: the flows do not exist yet (specs 03 and 07 build them). Add them to `e2e/` when those specs land; the harness, config and CI job are already in place.
+2. Playwright end-to-end tests for the three core flows: login, complete assessment, select an event. Run in CI. — **Login DONE 2026-09-06. Assessment DONE 2026-09-06** (`e2e/assessment.spec.ts`, written in spec 04 item 6; it seeds `assessment_answers` and stops one fixed question short of the end, so it needs no model calls). **Event-selection still DEFERRED**: spec 07 builds that flow.
 3. Lighthouse CI on the deployed preview: performance, accessibility, PWA checks. Report in PR. — **DEFERRED**: there are no meaningful pages to score yet. Every app route is a placeholder except `/login` and `/settings`, so a score now measures the scaffold and not the product. Revisit once spec 07's feed and calendar views exist.
 4. Pre-commit hook (husky + lint-staged) so bad code never gets committed. — DONE 2026-09-06.
 

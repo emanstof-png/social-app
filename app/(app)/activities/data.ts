@@ -31,7 +31,8 @@ export type ActivitiesData = {
   onboardingState: string;
 };
 
-const ACTIVITY_COLUMNS = "id, name, rationale, source, status, kind, fit_score";
+const ACTIVITY_COLUMNS =
+  "id, name, rationale, source, status, kind, fit_score, kind_edited_by_user";
 
 export async function readActivities(
   supabase: Db,
@@ -56,6 +57,7 @@ export async function readActivities(
         status: true,
         kind: true,
         fit_score: true,
+        kind_edited_by_user: true,
       })
       .parse(row),
   );
@@ -174,6 +176,7 @@ export async function seedFromAssessment(
         status: true,
         kind: true,
         fit_score: true,
+        kind_edited_by_user: true,
       })
       .parse(row),
   );

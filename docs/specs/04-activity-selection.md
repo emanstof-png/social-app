@@ -105,9 +105,11 @@ item 6 below retires the file so there is only one spec 04.
      new name inserts; a name already present **updates `rationale`,
      `fit_score` and `kind` only, and never touches `status` or `source`**, so
      re-running suggestions cannot resurrect something the user cut or demote
-     something they added themselves. Re-running twice with the same model
-     output must produce zero changes on the second run — test that directly,
-     it is CLAUDE.md's idempotency rule stated as an assertion.
+     something they added themselves. **`kind` is updated only while
+     `kind_edited_by_user` is false** — see the corrected rule below.
+     Re-running twice with the same model output must produce zero changes on
+     the second run — test that directly, it is CLAUDE.md's idempotency rule
+     stated as an assertion.
    - `focusState(activities, cap)` — returns the focus set (see item 5) and
      whether it is full.
 
@@ -189,6 +191,29 @@ item 6 below retires the file so there is only one spec 04.
 - **Re-running suggestions never touches `status` or `source`.** Stated twice
   on purpose (items 3 and 4): it is the whole content of the idempotency rule
   here, and getting it wrong silently un-cuts things the user rejected.
+- **CORRECTED after implementation: nor does it touch a hand-edited `kind`.**
+  As first written, this spec had re-runs update `kind`, and item 4 made `kind`
+  editable on the card. Together those meant a user could flip a suggestion to
+  "One-off", run suggestions again, and silently lose the edit. That is data
+  loss, and the model being usually right does not excuse it. The rule is now:
+
+  > A re-run updates `kind` only when `activities.kind_edited_by_user` is
+  > false. `rationale` and `fit_score` are still updated either way — only
+  > `kind` is protected.
+
+  `kind_edited_by_user` (migration 0007, default false) is set true by the
+  card's kind control and by adding your own activity, where the form makes you
+  choose. It stays false for a suggestion the model classified and for an
+  activity seeded from the assessment, where `kind` is only the app's default
+  guess — so a re-run may still correct a guess nobody has reviewed. That
+  behaviour is why this is a per-row flag rather than a comparison against the
+  last suggested value, which could not tell an unreviewed guess from a
+  decision.
+
+  A stored flag is right here even though this spec refuses to store the focus
+  set: the focus set is a pure function of columns that already exist, whereas
+  "a person once changed this field" is a fact about the past that nothing in
+  the current row implies.
 - **No `assessment_id` foreign key on `activities`.** Regenerating the persona
   writes a new `assessments` row, and activities the user has already curated
   should not detach from their plan when that happens. Activities belong to the
@@ -210,6 +235,8 @@ item 6 below retires the file so there is only one spec 04.
 - Running "Suggest more activities" twice adds no duplicate row, and leaves the
   status of every existing activity untouched — verify in the table, not only
   in the UI.
+- A `kind` changed by hand survives a re-run, and `kind_edited_by_user` is true
+  in the table afterwards.
 - The focus cap is enforced by the server action: a request to activate one
   past the cap is refused with a message naming what to bench, and refused
   again when replayed directly against the action rather than through the UI.

@@ -27,6 +27,7 @@ function activity(over: Partial<PlanActivity> & { name: string }): PlanActivity 
     status: "benched",
     kind: "recurring_community",
     fit_score: null,
+    kind_edited_by_user: false,
     ...over,
   };
 }
@@ -157,6 +158,10 @@ describe("seedRowsFrom", () => {
     expect(seeds.every((seed) => seed.kind === "recurring_community")).toBe(true);
   });
 
+  it("marks the guess as not hand-edited, so a suggestion may still correct it", () => {
+    expect(seeds.every((seed) => seed.kind_edited_by_user === false)).toBe(true);
+  });
+
   it("gives a seeded activity no fit score, because no model scored it", () => {
     expect(seeds.every((seed) => seed.fit_score === null)).toBe(true);
   });
@@ -234,6 +239,65 @@ describe("mergeSuggestions", () => {
     const second = mergeSuggestions(afterFirst, [suggestion]);
     expect(second.inserts).toEqual([]);
     expect(second.updates).toEqual([]);
+  });
+
+  it("never overwrites a kind the user set by hand", () => {
+    // The correction to spec 04 item 3: item 4 made kind editable on the card,
+    // so a re-run overwriting it is silent data loss.
+    const existing = [
+      activity({
+        name: "Bouldering",
+        kind: "one_off_source",
+        kind_edited_by_user: true,
+        rationale: "Same faces every week.",
+        fit_score: 78,
+      }),
+    ];
+    const { updates } = mergeSuggestions(existing, [suggestion]);
+
+    expect(updates).toEqual([]);
+  });
+
+  it("still updates rationale and fit_score on a hand-edited activity", () => {
+    // Only `kind` is protected. The model's fresh reasoning and score are still
+    // worth having.
+    const existing = [
+      activity({
+        name: "Bouldering",
+        kind: "one_off_source",
+        kind_edited_by_user: true,
+        rationale: "stale",
+        fit_score: 12,
+      }),
+    ];
+    const { updates } = mergeSuggestions(existing, [suggestion]);
+
+    expect(Object.keys(updates[0].changes).sort()).toEqual(["fit_score", "rationale"]);
+    expect(updates[0].changes).not.toHaveProperty("kind");
+  });
+
+  it("still corrects a kind nobody has reviewed", () => {
+    // An activity seeded from the assessment carries the app's own default
+    // guess, not a decision. Correcting that is the point of the flag being
+    // per-row rather than per-source.
+    const existing = [
+      activity({
+        name: "Bouldering",
+        source: "assessment",
+        kind: "recurring_community",
+        kind_edited_by_user: false,
+      }),
+    ];
+    const { updates } = mergeSuggestions(existing, [
+      { ...suggestion, kind: "one_off_source" },
+    ]);
+
+    expect(updates[0].changes.kind).toBe("one_off_source");
+  });
+
+  it("marks nothing as hand-edited when it inserts", () => {
+    const { inserts } = mergeSuggestions([], [suggestion]);
+    expect(inserts[0].kind_edited_by_user).toBe(false);
   });
 
   it("writes only the fields that actually differ", () => {

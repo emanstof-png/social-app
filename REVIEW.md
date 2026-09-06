@@ -28,7 +28,7 @@ activity whatever its status, and the five constraint answers. Output gains
 `kind` and `fit_score`; `supports_goal` must quote a goal it was given. Capped
 at 8 suggestions.
 
-**3. Plan engine (`lib/activities/plan.ts`), 32 tests, written before the code.**
+**3. Plan engine (`lib/activities/plan.ts`), 37 tests, written before the code.**
 Pure functions, no Supabase client: `suggestionInputFrom`, `seedRowsFrom`,
 `mergeSuggestions`, `focusState`, `canActivate`, `seasonPlan`. Every workflow
 decision lives here; the model fills one narrow joint.
@@ -63,6 +63,9 @@ Sign in at http://localhost:3000/login and open **Activities**.
 3. **Idempotency.** Click it a second time. No duplicate cards, and nothing you
    had already set or cut changes. Confirm in Supabase:
    `select name, status, source from activities order by created_at;`
+3b. **A hand-edited kind survives.** On any suggested card click **Make it
+   one-off** (or recurring), then run suggestions again. Your choice stands.
+   `select name, kind, kind_edited_by_user from activities;` shows the flag.
 4. **The focus cap.** Click **In focus** on three recurring activities, then a
    fourth. It is refused, and the message names what to set aside. Set one
    aside and the fourth goes in.
@@ -75,7 +78,7 @@ Sign in at http://localhost:3000/login and open **Activities**.
    Add a name that already exists and it is brought back rather than erroring.
 
 ```bash
-npm test            # 242 unit tests pass, 4 skipped (the live-gateway suite)
+npm test            # 247 unit tests pass, 4 skipped (the live-gateway suite)
 npx playwright test # login + assessment, against next build + next start
 ```
 
@@ -131,13 +134,9 @@ rows back from the insert itself rather than re-reading
    user has never seen is labelled "Set aside", which reads slightly oddly on a
    first visit.
 
-2. **A re-run can overwrite a user-edited `kind`.** The spec says a re-run
-   updates `rationale`, `fit_score` and `kind`. Item 4 also makes `kind`
-   editable on the card. So if you flip a suggestion to "One-off" and then run
-   suggestions again, the model's `kind` wins. I implemented the spec as
-   written rather than deviating. The fix, if you want it, is to stop updating
-   `kind` on rows that already exist — one line in `mergeSuggestions` — but it
-   costs you the correction when the model's first guess was wrong.
+2. ~~**A re-run can overwrite a user-edited `kind`.**~~ **FIXED after review**
+   — see "Correction" at the end of this file. A re-run now updates `kind` only
+   while `activities.kind_edited_by_user` is false (migration 0007).
 
 3. **`activities.status` still defaults to `'active'` in Postgres** while every
    insert in the app passes a status explicitly. Not a bug today; it is a trap
@@ -180,3 +179,64 @@ rows back from the insert itself rather than re-reading
   and steps are in STATUS.md. This is the one outstanding action for Eric.
 - Suggestions are **user-triggered only**. Nothing here runs on a schedule;
   scheduled discovery is spec 06 and follows the addendum.
+
+---
+
+## Correction after review: a hand-edited `kind` is no longer overwritten
+
+Raised at the review gate, and correct: spec 04 item 3 had a suggestion re-run
+update `kind`, while item 4 made `kind` editable on the card. A user could flip
+a suggestion to "One-off", run suggestions again, and silently lose the edit.
+That is data loss.
+
+**The rule now:** a re-run updates `kind` only while
+`activities.kind_edited_by_user` is false. `rationale` and `fit_score` are
+still updated either way — only `kind` is protected.
+
+- **Migration 0007** adds `activities.kind_edited_by_user boolean not null
+  default false`. Applied to `wqawpwbgrsjusbdopgbi`.
+- **Set true** by the card's kind control (`setKind`) and by adding your own
+  activity, where the form makes you choose.
+- **Stays false** for a suggestion the model classified and for an activity
+  seeded from the assessment, where `kind` is only the app's default guess. So
+  a re-run may still correct a guess nobody has reviewed.
+
+**Why a flag rather than comparing against the last suggested value.** Both
+protect the edit; only the flag can tell an unreviewed default guess from a
+decision, so only the flag keeps the useful half of the old behaviour — the
+model correcting the app's own `recurring_community` guess on a seeded row.
+Storing it is also consistent with the rest of spec 04 rather than a departure
+from it: the focus set is not stored because it is a pure function of columns
+that already exist, whereas "a person once changed this field" is a fact about
+the past that nothing in the current row implies.
+
+`docs/specs/04-activity-selection.md` records the corrected rule in item 3 and
+in "Decisions made while drafting", with the reasoning, so the spec and the code
+agree.
+
+### Verified
+
+`next build`, lint and 247 unit tests pass (4 new plan tests, written red first,
+plus the schema-vs-migration tests picking up the new column).
+
+Against a production server under a real magic-link session:
+
+- A real suggestion run stored 6 suggestions, all `kind_edited_by_user = false`.
+- Flipping one to "One-off" **through the real UI** wrote both `kind =
+  one_off_source` and `kind_edited_by_user = true` to the database.
+- A second real suggestion run left the edit intact.
+- The activity seeded from the assessment stayed `kind_edited_by_user = false`,
+  so it can still be corrected.
+
+**One honest limit on that run.** The second suggestion call returned no
+overlapping name — the prompt tells the model not to repeat what is already on
+the list — so the production run shows the edit surviving but does not itself
+execute the merge's `kind` branch. That branch is covered directly by
+`tests/plan.test.ts` ("never overwrites a kind the user set by hand", "still
+updates rationale and fit_score on a hand-edited activity", "still corrects a
+kind nobody has reviewed").
+
+**Also worth knowing:** a free model sometimes returns a valid, schema-clean
+`{"suggestions": []}` — an `ok` run_log row with nothing in it. The action
+already handles that ("Nothing new this time…"), but it means a verification
+script cannot assume one click yields suggestions.

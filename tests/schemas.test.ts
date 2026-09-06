@@ -110,6 +110,7 @@ describe("row schemas reject bad data", () => {
     status: "active",
     kind: "recurring_community",
     fit_score: 82,
+    kind_edited_by_user: false,
   };
 
   it("accepts a realistic activity row", () => {

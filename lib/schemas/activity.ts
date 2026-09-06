@@ -19,11 +19,23 @@ export const activityRow = timestampedRowBase.extend({
   status: activityStatus,
   kind: activityKind,
   fit_score: fitScore.nullable(),
+  /**
+   * True once a person set `kind` by hand, so an activity_suggestion re-run
+   * leaves it alone. Recorded rather than derived: nothing in the current row
+   * implies whether someone once changed this field.
+   */
+  kind_edited_by_user: z.boolean(),
 });
 
 export const activityInsert = activityRow
   .omit({ id: true, created_at: true, updated_at: true })
-  .partial({ rationale: true, status: true, kind: true, fit_score: true });
+  .partial({
+    rationale: true,
+    status: true,
+    kind: true,
+    fit_score: true,
+    kind_edited_by_user: true,
+  });
 
 export const activityUpdate = activityInsert
   .omit({ user_id: true })

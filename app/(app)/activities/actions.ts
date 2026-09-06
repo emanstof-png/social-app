@@ -292,9 +292,10 @@ export async function setKind(
       }
     }
 
+    // This is a person deciding, so a later suggestion run must not undo it.
     const { error } = await supabase
       .from("activities")
-      .update({ kind: parsed.data.kind })
+      .update({ kind: parsed.data.kind, kind_edited_by_user: true })
       .eq("id", target.id)
       .eq("user_id", userId);
 
@@ -390,6 +391,9 @@ export async function addActivity(
       kind: parsed.data.kind,
       fit_score: null,
       status,
+      // The add form makes the person choose recurring or one-off, so this is
+      // their decision too, not a guess to be corrected.
+      kind_edited_by_user: true,
     };
 
     const { data, error } = await supabase

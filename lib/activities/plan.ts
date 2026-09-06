@@ -28,6 +28,11 @@ export type PlanActivity = {
   status: ActivityStatus;
   kind: ActivityKind;
   fit_score: number | null;
+  /**
+   * True once a person set `kind` by hand. A suggestion re-run must then leave
+   * `kind` alone -- see mergeSuggestions.
+   */
+  kind_edited_by_user: boolean;
 };
 
 /** A row to be inserted: everything but the database-generated columns. */
@@ -135,6 +140,9 @@ export function seedRowsFrom(assessment: PlanAssessment): NewActivity[] {
       status: "benched",
       kind: "recurring_community",
       fit_score: null,
+      // The app's own default guess, not a decision anyone made, so a later
+      // suggestion run is still allowed to correct it.
+      kind_edited_by_user: false,
     });
   }
 
@@ -159,6 +167,14 @@ export type MergePlan = {
  * update touches `rationale`, `fit_score` and `kind` ONLY -- never `status` and
  * never `source`. That is what stops a re-run resurrecting something the user
  * cut or demoting something they added themselves.
+ *
+ * AND NOT `kind` EITHER, once a person has set it by hand. Spec 04 item 3 first
+ * said re-runs update `kind`; item 4 then made `kind` editable on the card, and
+ * together those silently threw away the edit on the next run. A person's
+ * decision outranks the model's guess, so `kind_edited_by_user` stops it. The
+ * flag is per row rather than per source, so a `kind` nobody has reviewed --
+ * the default guess on an activity seeded from the assessment -- can still be
+ * corrected.
  *
  * Only fields that actually differ are written, so running twice over the same
  * model output produces no writes at all the second time.
@@ -190,6 +206,8 @@ export function mergeSuggestions(
         status: "benched",
         kind: suggestion.kind,
         fit_score: suggestion.fit_score,
+        // The model classified this one; nobody has touched it.
+        kind_edited_by_user: false,
       });
       continue;
     }
@@ -197,7 +215,9 @@ export function mergeSuggestions(
     const changes: SuggestionChanges = {};
     if (row.rationale !== suggestion.rationale) changes.rationale = suggestion.rationale;
     if (row.fit_score !== suggestion.fit_score) changes.fit_score = suggestion.fit_score;
-    if (row.kind !== suggestion.kind) changes.kind = suggestion.kind;
+    if (!row.kind_edited_by_user && row.kind !== suggestion.kind) {
+      changes.kind = suggestion.kind;
+    }
 
     if (Object.keys(changes).length > 0) {
       plan.updates.push({ id: row.id, name: row.name, changes });

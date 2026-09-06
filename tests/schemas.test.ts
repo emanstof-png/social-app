@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 
+import { CATALOGUE_IDS } from "@/lib/assessments/catalogue";
+import { interviewInput, interviewOutput } from "@/lib/llm/components/interview";
 import * as schemas from "@/lib/schemas";
 import { enumLabels, tableColumns } from "./migration-sql";
 
@@ -170,6 +172,129 @@ describe("row schemas reject bad data", () => {
         liked: false,
       }),
     ).toMatchObject({ entity_name: "Sailing Club 2" });
+  });
+});
+
+describe("assessments.desired_activities carries the rationale (spec 03)", () => {
+  const assessment = {
+    id: "11111111-1111-4111-8111-111111111111",
+    user_id: "22222222-2222-4222-8222-222222222222",
+    summary: "You are happiest in a small group that meets often.",
+    goals: ["Be a regular at one weekly group"],
+    traits: ["steady", "slow to warm"],
+    desired_activities: [
+      { name: "open-water swimming", rationale: "It gets you outdoors with the same faces." },
+    ],
+    assessment_types_used: ["social_style"],
+    generated_at: "2026-09-06T10:00:00+00:00",
+    model_run_id: "33333333-3333-4333-8333-333333333333",
+    created_at: "2026-09-06T10:00:00+00:00",
+    updated_at: "2026-09-06T10:00:00+00:00",
+  };
+
+  it("accepts the {name, rationale} objects persona synthesis returns", () => {
+    expect(schemas.assessmentRow.parse(assessment).desired_activities[0]).toMatchObject({
+      name: "open-water swimming",
+    });
+  });
+
+  it("rejects the bare strings the spec 01 schema used to declare", () => {
+    // The column is jsonb, so Postgres would take these; the schema is what
+    // stops spec 04 from meeting a shape it cannot read a rationale out of.
+    expect(() =>
+      schemas.assessmentRow.parse({ ...assessment, desired_activities: ["swimming"] }),
+    ).toThrow();
+  });
+
+  it("requires a rationale, since spec 04 shows it to the user", () => {
+    expect(() =>
+      schemas.assessmentRow.parse({
+        ...assessment,
+        desired_activities: [{ name: "swimming" }],
+      }),
+    ).toThrow();
+  });
+});
+
+describe("interview component schemas (spec 03 item 2)", () => {
+  const question = {
+    question_id: "dropped_activities",
+    question_text: "What did you stop doing that you would pick up again?",
+    more_to_ask: true,
+  };
+
+  it("defaults a bare question to an open text answer with no suggestions", () => {
+    const parsed = interviewOutput.parse(question);
+    expect(parsed.input_kind).toBe("text");
+    expect(parsed.suggested_assessments).toEqual([]);
+  });
+
+  it("accepts a single_choice question with its choices", () => {
+    const parsed = interviewOutput.parse({
+      ...question,
+      input_kind: "single_choice",
+      choices: ["Weekly", "Monthly", "Rarely", "None of these"],
+    });
+    expect(parsed.choices).toHaveLength(4);
+  });
+
+  it("accepts choices as null, which is what the JSON-only instruction asks for", () => {
+    expect(interviewOutput.parse({ ...question, choices: null }).choices).toBeNull();
+  });
+
+  it("rejects an input_kind the UI cannot render", () => {
+    expect(() =>
+      interviewOutput.parse({ ...question, input_kind: "slider" }),
+    ).toThrow();
+  });
+
+  it("accepts catalogue ids in suggested_assessments", () => {
+    const parsed = interviewOutput.parse({
+      ...question,
+      more_to_ask: false,
+      suggested_assessments: [CATALOGUE_IDS[0], CATALOGUE_IDS[1]],
+    });
+    expect(parsed.suggested_assessments).toEqual([CATALOGUE_IDS[0], CATALOGUE_IDS[1]]);
+  });
+
+  it("rejects an invented inventory id rather than leaving the user with none", () => {
+    expect(() =>
+      interviewOutput.parse({ ...question, suggested_assessments: ["astrology"] }),
+    ).toThrow();
+  });
+
+  it("rejects more than the two inventories the flow will run", () => {
+    expect(() =>
+      interviewOutput.parse({
+        ...question,
+        suggested_assessments: [...CATALOGUE_IDS].slice(0, 3),
+      }),
+    ).toThrow();
+  });
+
+  it("defaults the question budget so an old caller still validates", () => {
+    const parsed = interviewInput.parse({ topic: "hobbies" });
+    expect(parsed.asked_count).toBe(0);
+    expect(parsed.max_questions).toBeGreaterThan(0);
+  });
+
+  it("carries the budget the flow engine passes in", () => {
+    const parsed = interviewInput.parse({
+      topic: "desires",
+      answers_so_far: [{ question: "q", answer: "a" }],
+      asked_count: 3,
+      max_questions: 6,
+    });
+    expect(parsed).toMatchObject({ asked_count: 3, max_questions: 6 });
+  });
+
+  it("rejects a fractional or negative asked_count", () => {
+    expect(() =>
+      interviewInput.parse({ topic: "hobbies", asked_count: -1 }),
+    ).toThrow();
+    expect(() =>
+      interviewInput.parse({ topic: "hobbies", asked_count: 1.5 }),
+    ).toThrow();
   });
 });
 

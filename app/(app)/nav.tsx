@@ -3,17 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-/** The eight sections of the app (spec 01, scope item 4). */
-export const NAV_ITEMS = [
-  { href: "/assessment", label: "Assessment" },
-  { href: "/activities", label: "Activities" },
-  { href: "/communities", label: "Communities" },
-  { href: "/feed", label: "Feed" },
-  { href: "/calendar", label: "Calendar" },
-  { href: "/evaluations", label: "Evaluations" },
-  { href: "/people", label: "People" },
-  { href: "/settings", label: "Settings" },
-] as const;
+import { NAV_ITEMS } from "./nav-items";
 
 export function Nav() {
   const pathname = usePathname();

@@ -79,21 +79,27 @@ problem.
   blocks pushes whose author is not tied to an account with project access. I set
   the repo identity to `Eric Manstof <emanstof@gmail.com>`, and the first commit
   with the correct author deployed successfully. Nothing further needed here.
-- **The app still is not publicly reachable. Two dashboard settings, both yours.**
-  1. **Deployment Protection is on.** Both
-     https://gazelle-hxbw4taop-easyday-outreach.vercel.app and
-     `gazelle-easyday-outreach.vercel.app` 302 to Vercel SSO. That fails the
-     "deployed URL loads" acceptance criterion for any normal visitor, and it will
-     break the magic-link callback, because the callback hits your domain in a
-     browser with no Vercel session. Set protection to preview deployments only.
-  2. **`gazelle-psi.vercel.app` returns 404 and is not serving this project.** The
-     Supabase redirect URL you configured for it therefore points nowhere. Find
-     the real production alias in the Vercel dashboard and update Supabase
-     Auth → URL Configuration to match it. (`gazelle.vercel.app` resolves to an
-     unrelated project, not yours — do not use it.)
-
-  Because of these, scope item 5 is half done: `npm run dev` works locally and is
-  verified, the deploy builds, but I could not confirm the deployed URL loads.
+- **Vercel settings you changed to finish the deploy.** Recorded so they are not
+  lost: the build preset was switched to **Next.js**, and **Deployment Protection
+  was turned off** so the production URL is publicly reachable. Leave protection
+  off for production, or at least off for the magic-link callback path: that
+  callback arrives in a browser with no Vercel session, so SSO in front of it
+  breaks sign-in. Scope item 5 is now fully done.
+- **Post-deploy hotfix: production 500 on `GET /`.** After the first working
+  deploy, signing in landed on a 500 with
+  `TypeError: e.NAV_ITEMS.map is not a function`. `NAV_ITEMS` was exported from
+  `nav.tsx`, a `"use client"` module, and imported by a Server Component. Across
+  that boundary the server receives a client-reference proxy rather than the real
+  array, so `.map` is undefined. **`next build` passes and `npm run dev` does not
+  reproduce it**, because dev also evaluates the module on the server, so nothing
+  in the normal loop catches it. Fixed by moving the constant to
+  `app/(app)/nav-items.ts`, which has no directive and can be imported from both
+  sides. `tests/client-boundary.test.ts` now fails if any `"use client"` module
+  exports a non-component. Verified properly: reproduced the exact error against a
+  production build holding a real session, then confirmed the same path returns
+  200 with all eight nav items after the fix.
+- **Signup trigger confirmed.** One auth user, one `profiles` row. The item I
+  could not verify at the end of the spec is now verified.
 - **`onboarding_state` has no enum.** ARCHITECTURE.md names the field but no
   values, so it is plain text defaulting to `'new'`. Spec 03 should pin the
   values down and I will add a migration converting it to an enum.
@@ -132,8 +138,11 @@ Spec 02 is the LLM gateway and model settings.
   set and ready either way.
 - **Keys:** nothing new. No Anthropic key is present, by your earlier decision, so
   the `anthropic` provider will exist in the enum but be unusable until one is added.
-- **Carry over:** turn off production Deployment Protection, point Supabase's
-  redirect URLs at the real production alias, and confirm the `profiles` row
-  appeared after your first sign-in.
+- **Carry over:** nothing outstanding. Deploy, sign-in and the signup trigger are
+  all confirmed working end to end.
+- **Watch for:** the client-boundary trap above will recur the moment spec 02
+  shares a constant between the model-settings UI and a Server Component. The
+  test guards it, but the rule is worth knowing: shared values go in a module
+  with no `"use client"`.
 - Vitest is set up, so spec 02's gateway tests have somewhere to live. CLAUDE.md
   wants those red before green.

@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 import { getCurrentUser } from "@/lib/supabase/server";
-import { NAV_ITEMS } from "./nav";
+import { NAV_ITEMS } from "./nav-items";
 
 export default async function HomePage() {
   const user = await getCurrentUser();

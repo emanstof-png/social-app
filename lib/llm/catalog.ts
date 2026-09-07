@@ -236,6 +236,13 @@ export const DEFAULT_MODEL_SETTINGS: Record<
     model: "minimax/minimax-m3:free",
     supports_tools: true,
   },
+  /**
+   * Spec 06: shares discovery_extraction's default and its reasoning exactly.
+   * Up to one call per community per scrape, reading a page rather than
+   * planning anything -- per-page volume work, not strategic reasoning, so it
+   * gets the high-volume free-tier model rather than discovery_research's
+   * more capable, more reliable pick.
+   */
   event_extraction: {
     provider: "openrouter",
     model: "minimax/minimax-m3:free",

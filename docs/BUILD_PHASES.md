@@ -17,7 +17,7 @@ Paste ONE at a time. Each spec file in docs/specs/ has scope, acceptance criteri
 | 11 | weekly-planning-and-invites | PRD §3.5–3.6, §4.4, 4.6 (weekly plan from feed, ongoing discovery job, invite suggestions, group-invite suggestion) | Sonnet | 1–2 |
 
 ## Actual build order so far
-`00 → 01 → 02 → 12a (pulled forward) → 03 → 04 → 05`. The table above is the plan; this is what was run.
+`00 → 01 → 02 → 12a (pulled forward) → 03 → 04 → 05 → 06`. The table above is the plan; this is what was run.
 
 **Spec 04 was re-drafted before it was built.** The original one-page sketch
 (`04-activities-and-focus.md`, written before specs 01–03 existed) was replaced
@@ -36,10 +36,19 @@ spec (0008 enums, 0009 tables) and a third that was not (0010,
 item 7 makes each round a separate request, so the already-read set needed
 somewhere to live, and nothing already stored could stand in for it.
 
-Next is spec 06 — scheduled jobs and calendar scraping. Read
-`docs/specs/06-scheduled-jobs-addendum.md` before drafting it. Spec 05 stores a
-`calendar_url` when it finds one and does nothing with it; that is where spec 06
-starts.
+Spec 06 finished on 2026-09-07 (tag `spec-06`), built from
+`docs/specs/06-calendar-scraping.md` with `06-scheduled-jobs-addendum.md`
+settling the (not-yet-needed) unattended-job fallback chain. Item 0 of the
+session was not the account-collision fix the spec assumed it would be: the
+e2e suite's account turned out to hold the only real discovery data in the
+project, migrated to the real account instead. Added migration 0011
+(`calendar_kind_checked_at`) and one new top-level module, `lib/scraping/`,
+alongside `lib/discovery/`.
+
+Next is spec 07 — the feed and calendar views. Spec 06 writes real `events`
+rows on demand from the Communities page; nothing reads them back yet except
+the raw table, and spec 07's placeholder `/feed` page is what spec 06's
+"View them in your feed" link already points at.
 
 ## Addenda waiting for the specs that have not been drafted yet
 Two decisions were settled during spec 02 that change what specs 05 and 06 must say. Read the addendum **before** drafting either spec; each one overrides the one-line description in the table above.
@@ -55,4 +64,4 @@ Two decisions were settled during spec 02 that change what specs 05 and 06 must 
 **Usable-daily target:** through spec 07.
 **Full spec:** through spec 11.
 
-Spec files 01–05 are written and built. Specs 06–11 get written when their phase starts: ask a planning chat to draft each one per `docs/specs/README.md`, which sets the document kinds, the required sections and the reading a drafter does first, so each spec reflects what actually got built rather than what was planned. The code schema the spec writes against is `docs/CONVENTIONS.md`.
+Spec files 01–06 are written and built. Specs 07–11 get written when their phase starts: ask a planning chat to draft each one per `docs/specs/README.md`, which sets the document kinds, the required sections and the reading a drafter does first, so each spec reflects what actually got built rather than what was planned. The code schema the spec writes against is `docs/CONVENTIONS.md`.

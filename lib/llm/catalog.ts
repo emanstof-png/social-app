@@ -182,20 +182,40 @@ export const FALLBACK_MODELS: Record<LlmProvider, readonly ModelOption[]> = {
  * Defaults seeded per user on first visit to Settings (STATUS.md, spec 02
  * TODO): discovery_research on Gemini, everything else on an OpenRouter
  * free-tier model. Both were exercised with real API calls on 2026-09-06.
+ *
+ * **2026-09-07 stopgap: every component that defaulted to
+ * `openrouter/minimax-m3:free` is now on `gemini/gemini-3.6-flash`
+ * instead.** Found live while verifying spec 06: OpenRouter's free tier has
+ * discontinued that model (HTTP 404, "This model is unavailable for free"),
+ * and `z-ai/glm-5.2:free` (an earlier default some accounts still carried
+ * in `model_settings`) is dead the same way. A brand-new user's onboarding
+ * would 404 on the very first `interview` call otherwise. `gemini-3.6-flash`
+ * is the one free-tier model confirmed working on this key on that date —
+ * this is "point at something that exists today," not a considered
+ * fit-for-task re-pick for each component, and it undoes the
+ * provider-diversity reasoning discovery_extraction's comment used to make
+ * (spreading joints across two providers so one provider's bad afternoon
+ * does not end every run): every component now shares one provider, so one
+ * provider's bad day is every component's bad day until this is revisited.
+ * The real fix is either buying OpenRouter credit or finding another
+ * confirmed-working free model (STATUS.md carries the open item).
  */
 export const DEFAULT_MODEL_SETTINGS: Record<
   LlmComponent,
   { provider: LlmProvider; model: string; supports_tools: boolean }
 > = {
-  interview: { provider: "openrouter", model: "minimax/minimax-m3:free", supports_tools: true },
+  // Stopgap (see the comment above this object).
+  interview: { provider: "gemini", model: "gemini-3.6-flash", supports_tools: true },
+  // Stopgap (see the comment above this object).
   persona_synthesis: {
-    provider: "openrouter",
-    model: "minimax/minimax-m3:free",
+    provider: "gemini",
+    model: "gemini-3.6-flash",
     supports_tools: true,
   },
+  // Stopgap (see the comment above this object).
   activity_suggestion: {
-    provider: "openrouter",
-    model: "minimax/minimax-m3:free",
+    provider: "gemini",
+    model: "gemini-3.6-flash",
     supports_tools: true,
   },
   /**
@@ -224,38 +244,40 @@ export const DEFAULT_MODEL_SETTINGS: Record<
     supports_tools: true,
   },
   /**
-   * Spec 05: the two discovery joints default to different providers on
-   * purpose. This one is per-page volume work -- up to MAX_PAGES_PER_ROUND
-   * calls a round, reading a page rather than reasoning about strategy -- so a
-   * 429 here costs one page, which the round engine drops with the reason
-   * logged. Spreading the two joints across two providers also means one
-   * provider's bad afternoon degrades a run instead of ending it.
+   * Spec 05 originally put the two discovery joints on different providers
+   * on purpose -- this one is per-page volume work (up to
+   * MAX_PAGES_PER_ROUND calls a round, reading a page rather than reasoning
+   * about strategy) and discovery_research is the reasoning-heavy one, so a
+   * 429 here cost one page instead of ending the run. That provider split is
+   * gone for now: stopgap (see the comment above this object). Still
+   * per-page volume work, same as discovery_research is still the more
+   * reasoning-heavy one; only the provider both currently share has changed.
    */
   discovery_extraction: {
-    provider: "openrouter",
-    model: "minimax/minimax-m3:free",
+    provider: "gemini",
+    model: "gemini-3.6-flash",
     supports_tools: true,
   },
   /**
-   * Spec 06: shares discovery_extraction's default and its reasoning exactly.
-   * Up to one call per community per scrape, reading a page rather than
-   * planning anything -- per-page volume work, not strategic reasoning, so it
-   * gets the high-volume free-tier model rather than discovery_research's
-   * more capable, more reliable pick.
+   * Shares discovery_extraction's default and reasoning exactly -- up to one
+   * call per community per scrape, reading a page rather than planning
+   * anything. Stopgap (see the comment above this object).
    */
   event_extraction: {
-    provider: "openrouter",
-    model: "minimax/minimax-m3:free",
+    provider: "gemini",
+    model: "gemini-3.6-flash",
     supports_tools: true,
   },
+  // Stopgap (see the comment above this object).
   weekly_planning: {
-    provider: "openrouter",
-    model: "minimax/minimax-m3:free",
+    provider: "gemini",
+    model: "gemini-3.6-flash",
     supports_tools: true,
   },
+  // Stopgap (see the comment above this object).
   invite_suggestion: {
-    provider: "openrouter",
-    model: "minimax/minimax-m3:free",
+    provider: "gemini",
+    model: "gemini-3.6-flash",
     supports_tools: true,
   },
 };

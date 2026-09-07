@@ -10,6 +10,9 @@ export const communityRow = timestampedRowBase.extend({
   website: z.string().nullable(),
   calendar_url: z.string().nullable(),
   calendar_kind: calendarKind.nullable(),
+  /** Spec 06 item 2: when detection last ran, so an unreachable calendar is
+   * not re-probed on every page load. Null means never attempted. */
+  calendar_kind_checked_at: timestamptz.nullable(),
   location: z.string().nullable(),
   /** Free text: real listings say "free", "$10", "donation". */
   cost: z.string().nullable(),
@@ -46,6 +49,7 @@ export const communityInsert = communityRow
     website: true,
     calendar_url: true,
     calendar_kind: true,
+    calendar_kind_checked_at: true,
     location: true,
     cost: true,
     discovered_at: true,

@@ -677,6 +677,7 @@ describe("discovery and search schemas (spec 05 item 2)", () => {
       website: "https://www.fridaynightdance.com/",
       calendar_url: null,
       calendar_kind: null,
+      calendar_kind_checked_at: null,
       location: "Glen Echo, MD",
       cost: "$15",
       discovered_at: "2026-09-06T10:00:00+00:00",

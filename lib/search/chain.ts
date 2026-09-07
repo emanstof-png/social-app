@@ -83,12 +83,18 @@ const TRACKING_PARAMS = new Set([
 ]);
 
 /**
- * The dedupe key for a URL. Lowercases the host, drops the fragment, drops
- * tracking parameters and collapses a trailing slash.
+ * The dedupe key for a URL. Lowercases the host, strips a leading `www.`, drops
+ * the fragment, drops tracking parameters and collapses a trailing slash.
  *
  * Returns the input untouched when it will not parse: a URL we cannot
  * understand is still a URL the loop may want to try, and silently dropping it
  * would be the chain deciding something that is not its business.
+ *
+ * `www.` is stripped because it is conventionally an alias for the bare host,
+ * and keeping the two apart wrote one organization to `communities` twice:
+ * `fsgw.org/silver-spring-contra-dance` and `www.fsgw.org/silver-spring-contra-dance`
+ * were two rows for one dance. Added at the spec-05-dedupe review gate, so this
+ * key now also collapses that pair for `mergeFindings`, which shares it.
  */
 export function normalizeUrl(raw: string): string {
   let url: URL;
@@ -100,6 +106,11 @@ export function normalizeUrl(raw: string): string {
 
   url.protocol = url.protocol.toLowerCase();
   url.hostname = url.hostname.toLowerCase();
+  // Only the exact `www.` label. `www2.` and `wwwifications.` are ordinary
+  // hosts and stay whole.
+  if (url.hostname.startsWith("www.")) {
+    url.hostname = url.hostname.slice(4);
+  }
   url.hash = "";
 
   for (const key of [...url.searchParams.keys()]) {

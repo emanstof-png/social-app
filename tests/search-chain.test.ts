@@ -50,15 +50,19 @@ function makeDeps(
 }
 
 describe("normalizeUrl", () => {
+  // The two expectations below carried a "www." through the result until the
+  // spec-05-dedupe review gate decided the host should lose it. Each still
+  // asserts its own subject -- host lowercasing, and path case surviving -- and
+  // neither was weakened to pass; only the host changed.
   it("lowercases the host and drops the fragment", () => {
     expect(normalizeUrl("https://WWW.Example.ORG/About#staff")).toBe(
-      "https://www.example.org/About",
+      "https://example.org/About",
     );
   });
 
   it("keeps the path's case, which servers may care about", () => {
     expect(normalizeUrl("http://www.contradancelinks.com/schedule_VA.html")).toBe(
-      "http://www.contradancelinks.com/schedule_VA.html",
+      "http://contradancelinks.com/schedule_VA.html",
     );
   });
 
@@ -94,6 +98,27 @@ describe("normalizeUrl", () => {
       normalizeUrl("https://example.org/about"),
     );
   });
+
+  it("strips a leading www., so the same site is one key either way", () => {
+    // Added at the spec-05-dedupe review gate. www is conventionally an alias
+    // for the bare host, and treating them as two keys wrote one organization
+    // twice: fsgw.org and www.fsgw.org were two rows for one dance.
+    expect(normalizeUrl("https://www.fsgw.org/silver-spring-contra-dance")).toBe(
+      normalizeUrl("https://fsgw.org/silver-spring-contra-dance"),
+    );
+    expect(normalizeUrl("https://www.example.org/about")).toBe(
+      "https://example.org/about",
+    );
+  });
+
+  it("strips only www., not a host that merely starts with those letters", () => {
+    expect(normalizeUrl("https://www2.example.org/a")).toBe(
+      "https://www2.example.org/a",
+    );
+    expect(normalizeUrl("https://wwwifications.example.org/a")).toBe(
+      "https://wwwifications.example.org/a",
+    );
+  });
 });
 
 describe("dedupeHits", () => {
@@ -109,6 +134,15 @@ describe("dedupeHits", () => {
       "https://example.org/b",
     ]);
     expect(deduped.map((entry) => entry.rank)).toEqual([1, 2]);
+  });
+
+  it("treats www and non-www as one page, so the loop reads it once", () => {
+    const deduped = dedupeHits([
+      hit("https://fsgw.org/silver-spring-contra-dance"),
+      hit("https://www.fsgw.org/silver-spring-contra-dance"),
+    ]);
+
+    expect(deduped).toHaveLength(1);
   });
 });
 

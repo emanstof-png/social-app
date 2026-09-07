@@ -633,6 +633,36 @@ describe("mergeFindings: the website key", () => {
     expect(plan.updates).toHaveLength(1);
   });
 
+  it("collapses the addendum's own Silver Spring pair, which differs only by www.", () => {
+    // The pair spec 05 actually wrote. The names do not match (no substring
+    // containment, by design), so the website key is the only thing that can
+    // join them -- and until the review gate it could not, because the two URLs
+    // differ by "www." alone.
+    const plan = mergeFindings(
+      [
+        existing({
+          id: "c1",
+          name: "Silver Spring Contra Dance",
+          website: "https://fsgw.org/silver-spring-contra-dance",
+        }),
+      ],
+      [
+        finding({
+          name: "Folklore Society of Greater Washington – Silver Spring Contra Dance",
+          website: "https://www.fsgw.org/silver-spring-contra-dance",
+          source_url: "https://www.fsgw.org/silver-spring-contra-dance",
+          cost: "$15",
+        }),
+      ],
+      "run-1",
+    );
+
+    expect(plan.inserts).toEqual([]);
+    expect(plan.updates).toHaveLength(1);
+    expect(plan.updates[0].id).toBe("c1");
+    expect(Object.keys(plan.updates[0].changes)).not.toContain("name");
+  });
+
   it("keeps two organizations under one parent site as two rows", () => {
     // Same host, different paths. Host-only matching would merge these.
     const plan = mergeFindings(

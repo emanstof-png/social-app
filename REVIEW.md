@@ -5,7 +5,11 @@ Built 2026-09-07 from `docs/specs/05-duplicate-names-addendum.md`. Tag
 **Spec 06 was not drafted, not started, and nothing here touches calendars or
 events.**
 
-No migration. No new dependency. Four files changed.
+**Corrected at the review gate**, the same way spec 04 was by migration 0007:
+`normalizeUrl` now strips a leading `www.`, which fixes the one pair the first
+pass left broken. Both original deviations were accepted as built.
+
+No migration. No new dependency. Six files changed.
 
 ---
 
@@ -30,6 +34,16 @@ update, whereas a narrower key would produce insert failures.
 Full URL, never the host, so two dances under one parent society's site stay two
 rows.
 
+**2a. `normalizeUrl` strips a leading `www.` (review-gate correction).** `www`
+is conventionally an alias for the bare host, and keeping the two apart is what
+let `fsgw.org/silver-spring-contra-dance` and
+`www.fsgw.org/silver-spring-contra-dance` become two rows for one dance. Only
+the exact `www.` label goes; `www2.` and `wwwifications.` are ordinary hosts and
+stay whole. This is a change to the shared search-chain key, so the search
+chain's own hit dedupe now also treats www and non-www as one page — a
+correctness gain there too, and it means the loop no longer reads that page
+twice.
+
 **3. Precedence.** Name key first, website key second, otherwise insert. When
 the two point at different stored rows the name match wins and the disagreement
 is recorded on a new `MergePlan.ambiguous`, surfaced by `round.ts` as an
@@ -39,18 +53,29 @@ is recorded on a new `MergePlan.ambiguous`, surfaced by `round.ts` as an
 `WRITABLE` and stays absent. A test now pins it, because the broader key makes a
 differently-named row reachable for the first time.
 
-Thirteen new tests, all written red before green: six for the name key (5 failed
-first, 1 was a negative case that had to stay green) and seven for the website
-key (5 failed first, 2 negative). The whole suite is 450 passing, 4 skipped.
+Seventeen new tests, all written red before green: six for the name key (5
+failed first, 1 a negative case that had to stay green), eight for the website
+key including the gate's Silver Spring case, and three for `normalizeUrl` and
+`dedupeHits`. The whole suite is 454 passing, 4 skipped.
+
+**Two pre-existing assertions in `tests/search-chain.test.ts` changed**, and you
+should know which: `lowercases the host and drops the fragment` and `keeps the
+path's case` both carried a `www.` through their expected string, so they
+asserted exactly the behaviour the gate reversed. Each still asserts its own
+subject — host lowercasing, and path case surviving — and neither was weakened
+to go green; only the host in the expected value changed. There is a comment
+above them saying so. No other test was touched.
 
 ### Files touched
 
 | File | Change |
 | --- | --- |
 | `lib/discovery/research.ts` | `matchKey`, `byWebsite`, precedence, `ambiguous` on `MergePlan` |
+| `lib/search/chain.ts` | `normalizeUrl` strips a leading `www.` (gate correction) |
 | `lib/discovery/round.ts` | two empty-plan literals, `AMBIGUOUS` log line |
 | `scripts/discover.ts` | dry-run reporting of ambiguities |
 | `tests/discovery.test.ts` | two new describe blocks |
+| `tests/search-chain.test.ts` | www cases, and the two assertions above |
 
 ---
 
@@ -69,17 +94,21 @@ npx vitest run tests/discovery.test.ts -t "match key"
 npx vitest run tests/discovery.test.ts -t "website key"
 ```
 
-**2. The merge against your real stored communities, writing nothing.**
+**2. The whole loop against the real APIs, writing nothing.**
 
 ```
-npm run discover -- --dry-run --activity "Contra dance" --location "Arlington, VA" --rounds 1 --user e868f1f2-0442-4805-9a1a-f78cb494126b
+npm run discover -- --dry-run --activity "Contra dance" --location "Arlington, VA" --rounds 1
 ```
 
-It prints `Read 9 stored communities for this activity` and then a
-`WOULD WRITE:` block. What to look for: the two FSGW rows now produce a single
-`~ Folklore Society of Greater Washington (FSGW)` update rather than two, and
-several `- ... : Already found earlier in this same round.` lines. Nothing
+Ends in a `WOULD WRITE:` block, with `- ... : Already found earlier in this same
+round.` lines where two findings turned out to be one organization. Nothing
 reaches Supabase; the last line says so.
+
+Adding `--user e868f1f2-0442-4805-9a1a-f78cb494126b` is meant to merge against
+your stored rows and print `Read 9 stored communities for this activity` first.
+**It currently prints no such line and merges against an empty list**, because
+those 9 rows were orphaned from their activity while verifying the first pass.
+See "Verified" below; it is repairable with two SQL statements.
 
 **3. The page, under a real production session.**
 
@@ -131,6 +160,36 @@ and then asking you to archive it seemed worse than saying so here. If you want
 the write path exercised before spec 06, click **Discover** on `/communities`
 once after archiving, and expect to archive one more row.
 
+### The gate correction, and one thing I broke while verifying the first pass
+
+The `www.` change was verified against your 9 stored communities read-only,
+because the full dry run can no longer reach them:
+
+- **Running the committed e2e suite deleted the "Contra dance" activity row.**
+  `e2e/assessment.spec.ts` calls `resetUser`, which deletes `activities`,
+  `assessments` and `assessment_answers` for the e2e user — by design, the suite
+  owns that account. But the 9 communities hang off that activity, and
+  `communities.activity_id` is `ON DELETE SET NULL`, so **all 9 are now
+  orphaned with `activity_id = null`.** The rows and their names, websites and
+  source URLs are intact; only the link is gone. This happened during the first
+  pass's verification, before the gate.
+- `npm run discover --dry-run --user ...` finds communities *through* the
+  activity, so it now reports no matching activity and merges against an empty
+  list. That is why the re-run you asked for could not be the proof on its own.
+- Restoring the link needs two writes to Supabase (re-insert the activity, point
+  the 9 rows back at it). **I was blocked from making them and did not work
+  around it** — say the word and I will, or do it from the SQL editor.
+- Instead the claim was verified directly against the same rows, read-only:
+  `mergeFindings` was handed all 9 stored communities and the exact finding that
+  produced the duplicate. Result above — 0 inserts, one update, ambiguity
+  reported. This is a narrower check than a full dry run, and it is the specific
+  claim the gate asked about.
+
+**Worth deciding before spec 06:** the e2e suite and the discovery data now
+share one account, so running the tests damages the discovery fixtures. Either
+give the e2e suite its own user, or add `communities` to `resetUser`, or accept
+that `/communities` data on that account is disposable.
+
 ---
 
 ## Where I deviated, and why
@@ -155,24 +214,24 @@ theoretical. It is one `Set` and one test if you want it reverted.
 
 ## What I was unsure about
 
-**1. The addendum's own first pair is not fixed, and spec 07 should know.** The
-two known duplicates behave differently:
+**1. Both known pairs are now handled — this was the gate's correction.** Both
+are covered, by different keys:
 
 | Pair | Name key | Website key | Result |
 | --- | --- | --- | --- |
-| "FSGW" / "The FSGW" | collapses | n/a | **fixed** |
-| "Silver Spring Contra Dance" / "FSGW – Silver Spring Contra Dance" | no match | no match | **not fixed** |
+| "FSGW" / "The FSGW" | collapses | n/a | **fixed** (first pass) |
+| "Silver Spring Contra Dance" / "FSGW – Silver Spring Contra Dance" | no match | collapses once `www.` is stripped | **fixed** (gate correction) |
 
 The second pair's websites are `https://fsgw.org/silver-spring-contra-dance` and
-`https://www.fsgw.org/silver-spring-contra-dance`. `normalizeUrl` lowercases the
-host but does not strip `www.`, so those are two keys. The names do not match
-either, because there is deliberately no substring containment. A future run can
-therefore still produce this shape of duplicate.
+`https://www.fsgw.org/silver-spring-contra-dance`. Their names do not match and
+never will, because there is deliberately no substring containment, so the
+website key was the only thing that could join them — and it now does.
 
-Stripping `www.` in `normalizeUrl` would fix it, and would also change how the
-search chain dedupes hits, which is a different subsystem with its own tests. I
-did not make that change unasked. **This is the one decision I would put back to
-you before spec 07.**
+Confirmed against your actual stored rows, read-only: replaying the finding that
+produced the duplicate now yields **0 inserts** and one update to the
+name-matched row, and it reports the ambiguity by id, naming both stored rows as
+possibly one organization. Before the correction that same finding inserted a
+tenth row.
 
 **2. The trailing-parenthetical rule is letters-only.** `(fsgw)` is stripped;
 `(FSGW-sponsored)` and `(Arlington VA)` are not, because the addendum says
@@ -198,9 +257,11 @@ and legal suffixes are not in the addendum's list and I did not add them.
 - **Archive the duplicate rows first** (section 4 of "How to test it by hand").
   Spec 07 attaching event streams to both halves of a pair is the failure the
   addendum was written to prevent, and code alone cannot undo the rows already
-  there.
-- **Decide the `www.` question** in "What I was unsure about" #1 before spec 07,
-  since it decides whether the pair can come back.
+  there. Discovery will now *tell* you about this pair, on an `AMBIGUOUS` line,
+  every round until one of them is archived.
+- **Decide the shared-account question** in "Verified" above: the e2e suite
+  deletes the activity the discovery fixtures hang off, and the 9 communities
+  are currently orphaned.
 - **Spec 06 is untouched and undrafted.** It still starts where spec 05 left it:
   `communities.calendar_url` populated, `calendar_kind` always null,
   `event_extraction` still on its spec 02 stub prompt, and `lib/discovery/fetch.ts`

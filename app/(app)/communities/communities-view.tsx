@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState, useTransition } from "react";
 
 import { MAX_ROUNDS } from "@/lib/discovery/budget";
-import { advanceDiscovery, updateCommunity } from "./actions";
+import { advanceDiscovery, scrapeCommunityEvents, updateCommunity } from "./actions";
 import type { CommunityCard, RunCard } from "./data";
 import {
   COMMUNITY_STATUS_LABELS,
@@ -267,6 +267,8 @@ function Card({ community }: { community: CommunityCard }) {
         ) : null}
       </div>
 
+      <ScrapeSection community={community} />
+
       <div className="mt-1 flex flex-wrap items-center gap-3">
         <label className="flex items-center gap-1.5 text-xs">
           <span className="opacity-70">Status</span>
@@ -315,5 +317,90 @@ function Card({ community }: { community: CommunityCard }) {
         </p>
       ) : null}
     </article>
+  );
+}
+
+const CALENDAR_KIND_LABELS: Record<string, string> = {
+  ics: "ICS feed",
+  html: "Web page",
+  api: "Meetup/Eventbrite",
+  manual: "Manual",
+};
+
+/**
+ * The "Find events" action per community (spec 06 item 7). One scrape is one
+ * request -- unlike ActivitySection's discovery loop, a single community's
+ * calendar is one feed or one page, not an open-ended search, so there is no
+ * progress bar or Continue button here.
+ */
+function ScrapeSection({ community }: { community: CommunityCard }) {
+  const [result, setResult] = useState<ActionResult | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  function scrape() {
+    setResult(null);
+    startTransition(async () => setResult(await scrapeCommunityEvents(community.id)));
+  }
+
+  if (!community.calendar_url) {
+    return (
+      <p className="text-xs opacity-60">No calendar found for this community yet.</p>
+    );
+  }
+
+  const kindLabel = community.calendar_kind
+    ? (CALENDAR_KIND_LABELS[community.calendar_kind] ?? community.calendar_kind)
+    : null;
+
+  return (
+    <div className="flex flex-col gap-2 border-t border-black/10 pt-2 dark:border-white/15">
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={scrape}
+          disabled={pending}
+          className="rounded border border-current px-2 py-1 text-xs disabled:opacity-50"
+        >
+          {pending ? "Checking calendar…" : "Find events"}
+        </button>
+        {kindLabel ? (
+          <span className="rounded border border-current px-1.5 py-0.5 text-[10px] uppercase tracking-wide opacity-60">
+            {kindLabel}
+          </span>
+        ) : null}
+        {!community.calendar_kind && community.calendar_kind_checked_at ? (
+          <span className="text-xs opacity-60">
+            Calendar could not be reached last time it was checked.
+          </span>
+        ) : null}
+      </div>
+
+      {result && !result.ok ? (
+        <div
+          role="alert"
+          className="flex flex-col gap-2 rounded border border-red-500/40 bg-red-500/10 p-3 text-sm"
+        >
+          <p className="whitespace-pre-wrap">{result.error}</p>
+          <button
+            type="button"
+            onClick={scrape}
+            disabled={pending}
+            className="self-start rounded border border-current px-2 py-1 text-xs disabled:opacity-50"
+          >
+            Retry
+          </button>
+        </div>
+      ) : null}
+
+      {result?.ok && result.note ? (
+        <p className="rounded border border-black/10 p-3 text-xs opacity-80 dark:border-white/15">
+          {result.note}{" "}
+          <Link href="/feed" className="underline">
+            View them in your feed
+          </Link>
+          .
+        </p>
+      ) : null}
+    </div>
   );
 }

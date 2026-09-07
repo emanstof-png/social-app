@@ -4,6 +4,7 @@ import { focusState, type PlanActivity } from "@/lib/activities/plan";
 import type { RunState } from "@/lib/discovery/research";
 import { communityRow } from "@/lib/schemas/community";
 import { discoveryRunRow } from "@/lib/schemas/discovery";
+import type { CalendarKind } from "@/lib/schemas/enums";
 import { activityRow } from "@/lib/schemas/activity";
 import { FOCUS_CAP_DEFAULT, focusCap } from "@/lib/schemas/profile";
 
@@ -26,6 +27,8 @@ export type CommunityCard = {
   type: string;
   website: string | null;
   calendar_url: string | null;
+  calendar_kind: string | null;
+  calendar_kind_checked_at: string | null;
   location: string | null;
   cost: string | null;
   status: string;
@@ -68,8 +71,9 @@ export type CommunitiesData = {
 };
 
 const COMMUNITY_COLUMNS =
-  "id, name, activity_id, type, website, calendar_url, location, cost, " +
-  "status, user_notes, focus, source_url, why_relevant, discovered_at";
+  "id, name, activity_id, type, website, calendar_url, calendar_kind, " +
+  "calendar_kind_checked_at, location, cost, status, user_notes, focus, " +
+  "source_url, why_relevant, discovered_at";
 
 const RUN_COLUMNS =
   "id, activity_id, location, status, rounds_done, searches_used, pages_read, " +
@@ -78,10 +82,10 @@ const RUN_COLUMNS =
 export async function readProfile(
   supabase: Db,
   userId: string,
-): Promise<{ cap: number; homeLocation: string; onboardingState: string }> {
+): Promise<{ cap: number; homeLocation: string; onboardingState: string; timezone: string }> {
   const { data, error } = await supabase
     .from("profiles")
-    .select("focus_cap, home_location, onboarding_state")
+    .select("focus_cap, home_location, onboarding_state, timezone")
     .eq("user_id", userId)
     .maybeSingle();
 
@@ -92,6 +96,8 @@ export async function readProfile(
     // The one place a search location comes from. There is no second one.
     homeLocation: (data?.home_location as string) || "Arlington",
     onboardingState: (data?.onboarding_state as string) ?? "new",
+    // Spec 06 item 7: event_extraction and the ICS parser both need it.
+    timezone: (data?.timezone as string) || "America/New_York",
   };
 }
 
@@ -146,6 +152,8 @@ export async function readCommunities(
           type: true,
           website: true,
           calendar_url: true,
+          calendar_kind: true,
+          calendar_kind_checked_at: true,
           location: true,
           cost: true,
           status: true,
@@ -157,6 +165,42 @@ export async function readCommunities(
         })
         .parse(row) as CommunityCard,
   );
+}
+
+export type ScrapeTarget = {
+  id: string;
+  name: string;
+  calendarUrl: string | null;
+  calendarKind: CalendarKind | null;
+};
+
+/** One community, for the scrape action -- it only needs these four fields. */
+export async function readCommunityForScrape(
+  supabase: Db,
+  userId: string,
+  communityId: string,
+): Promise<ScrapeTarget | null> {
+  const { data, error } = await supabase
+    .from("communities")
+    .select("id, name, calendar_url, calendar_kind")
+    .eq("id", communityId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) throw new Error(`Could not read that community: ${error.message}`);
+  if (!data) return null;
+
+  // Validated on the way out of the database, like every other row (spec 01).
+  const row = communityRow
+    .pick({ id: true, name: true, calendar_url: true, calendar_kind: true })
+    .parse(data);
+
+  return {
+    id: row.id,
+    name: row.name,
+    calendarUrl: row.calendar_url,
+    calendarKind: row.calendar_kind,
+  };
 }
 
 /** The newest run per activity, so the page can resume or report on it. */

@@ -11,10 +11,13 @@ import { roundDepsFor, saveRunState } from "@/lib/discovery/round-server";
 import { GatewayError } from "@/lib/llm/errors";
 import { hasSelectedActivities } from "@/lib/onboarding";
 import { communityStatus } from "@/lib/schemas/enums";
+import { scrapeCommunity } from "@/lib/scraping/plan";
+import { scrapeDepsFor } from "@/lib/scraping/plan-server";
 import { SearchError } from "@/lib/search/types";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
   readActivities,
+  readCommunityForScrape,
   readProfile,
   readRuns,
   runStateFrom,
@@ -280,4 +283,66 @@ export async function archiveCommunity(communityId: string): Promise<ActionResul
 
 export async function restoreCommunity(communityId: string): Promise<ActionResult> {
   return updateCommunity(communityId, { status: "todo" });
+}
+
+/** "YYYY-MM-DD" in the given zone, for event_extraction's relative-date resolution. */
+function todayIn(timezone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+/**
+ * One scrape, one community (spec 06 item 7). Unlike advanceDiscovery, there
+ * is no round budget or resumability to build: a community's calendar is one
+ * ICS feed or one HTML page, fetched once, per plan.ts's own drafting
+ * decision.
+ */
+export async function scrapeCommunityEvents(communityId: string): Promise<ActionResult> {
+  try {
+    const { supabase, userId } = await currentUser();
+    const id = z.uuid().parse(communityId);
+
+    const target = await readCommunityForScrape(supabase, userId, id);
+    if (!target) throw new Error("That community no longer exists.");
+    if (!target.calendarUrl) {
+      throw new Error("This community has no calendar URL to scrape yet.");
+    }
+
+    const profile = await readProfile(supabase, userId);
+
+    const deps = scrapeDepsFor({
+      supabase,
+      userId,
+      communityId: id,
+      timezone: profile.timezone,
+      fetcher: createPageFetcher(),
+    });
+
+    const report = await scrapeCommunity(deps, {
+      communityId: id,
+      communityName: target.name,
+      calendarUrl: target.calendarUrl,
+      calendarKind: target.calendarKind,
+      today: todayIn(profile.timezone),
+      timezone: profile.timezone,
+    });
+
+    revalidatePath("/communities");
+
+    if (report.outcome === "unreachable" || report.outcome === "fetch_failed") {
+      return { ok: false, error: report.why };
+    }
+
+    const counts =
+      report.written.inserted > 0 || report.written.updated > 0
+        ? ` ${report.written.inserted} new, ${report.written.updated} updated.`
+        : "";
+    return { ok: true, note: `${report.why}${counts}` };
+  } catch (cause) {
+    return { ok: false, error: describe(cause) };
+  }
 }

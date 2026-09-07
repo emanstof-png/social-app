@@ -2,6 +2,7 @@
 
 ## Prime directive
 Implement the ONE spec file named in the session prompt exactly. If the spec is ambiguous or you want to deviate, STOP and ask. Never silently improvise. Never add features not in docs/PRD.md.
+- Before implementing, read `docs/CONVENTIONS.md` and every addendum the spec names in its opening paragraph. If a named addendum is missing from the repo, STOP and ask.
 
 ## Checkpoint discipline (no one-shotting)
 - Work through the spec's numbered Scope items ONE AT A TIME. After each item: summarize what you did in 3-5 lines, list files touched, and WAIT for the user to say "continue" before the next item.
@@ -17,6 +18,7 @@ Implement the ONE spec file named in the session prompt exactly. If the spec is 
 
 ## Code rules
 - Next.js (App Router) + TypeScript + Tailwind. Supabase JS client. Zod for all schemas.
+- Follow `docs/CONVENTIONS.md`. A pattern the conventions do not cover, or a deviation from one they do, is a STOP-and-ask, and the resolution is added to `docs/CONVENTIONS.md` in the same spec.
 - Dependencies beyond these: flag before adding.
 - Secrets from environment variables only. Never in code, never committed. `.env.local` is gitignored.
 - Every scheduled job runnable standalone with `--dry-run`: full logic, no writes. Build dry-run first.

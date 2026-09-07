@@ -1,6 +1,6 @@
 # STATUS — gazelle kanban
 
-**Actual build order so far: 00 → 01 → 02 → 12a (pulled forward) → 03 → 04.** `docs/BUILD_PHASES.md` carries the same note and the reason 12a moved. Next is spec 05.
+**Actual build order so far: 00 → 01 → 02 → 12a (pulled forward) → 03 → 04 → 05.** `docs/BUILD_PHASES.md` carries the same note and the reason 12a moved. Next is spec 06.
 
 **Action needed from Eric (still outstanding):** the Playwright CI job skips itself — green, with a log line saying so — until four GitHub **repository secrets** exist on `github.com/emanstof-png/social-app` (Settings → Secrets and variables → Actions → New repository secret):
 `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `ENCRYPTION_KEY`.
@@ -9,7 +9,6 @@ Their values are the ones already in `.env.local`. Until they are set, no end-to
 **Addenda waiting to be read when their spec is drafted:** `docs/specs/05-discovery-addendum.md` (spec 05) and `docs/specs/06-scheduled-jobs-addendum.md` (spec 06). Both settle decisions made during spec 02 and override the one-line descriptions in `docs/BUILD_PHASES.md`. `docs/specs/10-crm-addition-note.md` is a smaller note of the same kind for spec 10.
 
 ## Backlog
-- [DISCOVER] spec 05 community-discovery — **spec drafted and approved 2026-09-06, `docs/specs/05-community-discovery.md`. Not started: blocked on the Exa key (see Blocked).** The addendum it was drafted from is `docs/specs/05-discovery-addendum.md`.
 - [FEED] spec 06 calendar-scraping (draft spec first) — read `docs/specs/06-scheduled-jobs-addendum.md` when drafting. Settled 2026-09-06: unattended jobs get a model-provider fallback chain Gemini -> OpenRouter free -> Ollama Cloud, no OpenRouter credit purchased.
 - [FEED] spec 07 feed-and-calendar-views (draft spec first)
 - [FEED] spec 08 google-calendar-sync (draft spec first) — TODO: needs GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET (Google Cloud OAuth creds)
@@ -18,21 +17,25 @@ Their values are the ones already in `.env.local`. Until they are set, no end-to
 - [LOOP] spec 11 weekly-planning-and-invites (draft spec first) — scheduled parts follow `docs/specs/06-scheduled-jobs-addendum.md`.
 
 ## Next
-- [DISCOVER] spec 05 community-discovery — **the spec is written and approved: `docs/specs/05-community-discovery.md`.** Implementation starts once the Exa key exists. It searches against the focus set spec 04 built: the activities with `status = 'active'` and `kind = 'recurring_community'`, capped at `profiles.focus_cap`. `onboarding_state` reaching `activities_selected` is the signal that a focus set exists.
-- 12a item 2: assessment test DONE (spec 04 item 6, `e2e/assessment.spec.ts`). Event selection still waits for spec 07.
+- [FEED] spec 06 calendar-scraping — **draft the spec first**, reading `docs/specs/06-scheduled-jobs-addendum.md`. Spec 05 stores a `calendar_url` on a community when it finds one and does nothing with it; that is where spec 06 starts. What spec 05 leaves it: `communities.calendar_url` and `calendar_kind` (the second still always null — nothing detects it yet), the `event_extraction` component still on its spec 02 stub prompt, and a page-fetching layer (`lib/discovery/fetch.ts`) with robots.txt already honoured that spec 06 should reuse rather than rebuild.
+- 12a item 2: assessment test DONE (spec 04 item 6, `e2e/assessment.spec.ts`). Event selection still waits for spec 07. Spec 05 deliberately adds no e2e suite — see its REVIEW.md.
 
 ## In Progress
 - (none)
 
 ## Blocked
-- **spec 05 implementation — waiting on search API keys (Eric, 2026-09-06).** Nothing in the spec can be verified without at least one live search provider, so the build does not start until `EXA_API_KEY` exists. Three no-card free tiers, full instructions at the top of `docs/specs/05-community-discovery.md`:
-  - **Exa** (primary, required to start) — exa.ai → dashboard → API Keys → `EXA_API_KEY`
-  - **Tavily** (secondary, can come later) — tavily.com → app.tavily.com → API Keys → `TAVILY_API_KEY`
-  - **Serper** (tertiary, can come later) — serper.dev → dashboard → API Key → `SERPER_API_KEY`
+- (nothing blocking the next spec)
 
-  Each goes in `.env.local` **and** Vercel → `gazelle` → Environment Variables, Production and Preview. Not GitHub secrets: every test in spec 05 is fixture-based with no network. The chain skips any provider with no key, so Exa alone unblocks the build.
+**Search keys: OBTAINED 2026-09-06.** All three are in `.env.local` and all three answered a live call before anything was built against them: `EXA_API_KEY`, `TAVILY_API_KEY`, `SERPER_API_KEY`. Eric reports them set in Vercel; **that has not been verified from this machine** — the deployed app cannot search if any is missing there, and spec 05's verification was done against a local `next start`. Not GitHub secrets: every spec 05 test is fixture-based with no network.
 
 ## Done
+- spec 05 community-discovery — done 2026-09-06, tag `spec-05`. All eight scope items. The focus set now has real local organizations under it, each with the URL of the page its facts came from.
+  - Migrations 0008 (`search_provider`, `discovery_run_status`, `discovery_extraction` on `llm_component`), 0009 (`discovery_runs`, `search_log`, and `source_url`/`evidence`/`discovery_run_id`/`why_relevant` on `communities`) and 0010 (`discovery_runs.pages_seen`). All applied to wqawpwbgrsjusbdopgbi and verified in `information_schema` and `pg_policies`; both new tables have select/insert/update and no delete.
+  - **0010 was not in the spec.** Item 3 requires deduping pages across rounds and item 7 makes each round a separate request, so the already-read set needed persistence, and nothing stored could stand in: `search_log` holds queries, and `communities.source_url` only covers pages that found something.
+  - **Gemini Google Search grounding is gone from the codebase**, not just unused: `ChatRequest.googleSearch`, the `google_search` tool push in `callGemini` and the gateway flag are all removed. `discovery_research` is `requiresTools: false`. The `tools_unsupported` gate stays for a future component that needs tools.
+  - **Verified per the CLAUDE.md rule, both halves.** `next build` passed AND a production `next start` served a real authenticated request that rendered `/communities`, ran real discovery rounds against real search keys and real models, and showed real communities with working source links. Nine communities written, each with a non-null `source_url`. Not yet exercised on the deployed Vercel URL.
+  - **Idempotency verified in the table, not the UI.** A community marked `status='went_once'`, `focus=true`, `user_notes='Went on the 5th. DO NOT OVERWRITE.'` still read exactly that after a second real discovery round, which added no duplicate rows.
+  - Known quality issue for spec 06/07: one real organization can be written twice under different names ("Silver Spring Contra Dance" and "Folklore Society of Greater Washington – Silver Spring Contra Dance"). `communities_user_name_key` is on the name, so this is per spec, but it is real. See REVIEW.md.
 - spec 04 activity-selection — done 2026-09-06, tag `spec-04`. All six scope items. The persona is now a short, committed list of activities with a focus set spec 05 can search against.
   - **Spec re-drafted before building.** The original `04-activities-and-focus.md` sketch predated specs 01–03; it was replaced by `docs/specs/04-activity-selection.md`, drafted against what spec 03 actually shipped, and deleted. Nothing in it was dropped.
   - Migration 0006: `activity_kind` enum, `activities.kind` (default `recurring_community`), `activities.fit_score` (0–100, advisory), `profiles.focus_cap` (2–4, default 3). Applied to wqawpwbgrsjusbdopgbi and verified in `information_schema`.

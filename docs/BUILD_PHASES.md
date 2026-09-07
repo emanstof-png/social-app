@@ -17,7 +17,7 @@ Paste ONE at a time. Each spec file in docs/specs/ has scope, acceptance criteri
 | 11 | weekly-planning-and-invites | PRD §3.5–3.6, §4.4, 4.6 (weekly plan from feed, ongoing discovery job, invite suggestions, group-invite suggestion) | Sonnet | 1–2 |
 
 ## Actual build order so far
-`00 → 01 → 02 → 12a (pulled forward) → 03 → 04`. The table above is the plan; this is what was run.
+`00 → 01 → 02 → 12a (pulled forward) → 03 → 04 → 05`. The table above is the plan; this is what was run.
 
 **Spec 04 was re-drafted before it was built.** The original one-page sketch
 (`04-activities-and-focus.md`, written before specs 01–03 existed) was replaced
@@ -26,8 +26,20 @@ shipped. The sketch is deleted; nothing in it was dropped.
 
 **Out of order: 12a ran on 2026-09-06, between spec 02 and spec 03.** Spec 12 is written as post-build professionalization, but 12a is quality gates — CI, an end-to-end login test and a pre-commit hook. Those are worth more guarding specs 03–11 as they are written than auditing them once they are finished, and spec 01 had already shipped a production-only bug (`NAV_ITEMS`) that a gate would have caught. Only 12a moved; 12b–12e stay after spec 11. Within 12a, items 2 (assessment and event-selection tests) and 3 (Lighthouse CI) are deferred because the pages they would test do not exist yet — see `docs/specs/12-professionalize.md`. Spec 03 has now built the assessment flow, so 12a item 2's assessment test is unblocked and waiting to be written; event selection still waits for spec 07.
 
-Spec 04 finished on 2026-09-06 (tag `spec-04`). Next is spec 05 — read
-`docs/specs/05-discovery-addendum.md` before drafting it.
+Spec 04 finished on 2026-09-06 (tag `spec-04`).
+
+Spec 05 finished on 2026-09-06 (tag `spec-05`), built from
+`docs/specs/05-community-discovery.md` with `05-discovery-addendum.md` settling
+the search chain and the research loop. It added two migrations planned in the
+spec (0008 enums, 0009 tables) and a third that was not (0010,
+`discovery_runs.pages_seen`): item 3 requires deduping pages across rounds and
+item 7 makes each round a separate request, so the already-read set needed
+somewhere to live, and nothing already stored could stand in for it.
+
+Next is spec 06 — scheduled jobs and calendar scraping. Read
+`docs/specs/06-scheduled-jobs-addendum.md` before drafting it. Spec 05 stores a
+`calendar_url` when it finds one and does nothing with it; that is where spec 06
+starts.
 
 ## Addenda waiting for the specs that have not been drafted yet
 Two decisions were settled during spec 02 that change what specs 05 and 06 must say. Read the addendum **before** drafting either spec; each one overrides the one-line description in the table above.

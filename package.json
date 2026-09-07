@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "next build && playwright test",
-    "prepare": "husky"
+    "prepare": "husky",
+    "discover": "tsx --env-file=.env.local scripts/discover.ts"
   },
   "lint-staged": {
     "*.{ts,tsx,mts,mjs}": "eslint --fix --no-warn-ignored"

@@ -29,6 +29,7 @@ const RUN: RunState = {
   phase: "idle",
   roundsDone: 0,
   searchesUsed: 0,
+  pagesRead: 0,
   emptyRounds: 0,
   communitiesFound: 0,
   lastError: null,
@@ -464,6 +465,20 @@ describe("advanceRun", () => {
       searchesUsed: 3,
       communitiesFound: 2,
     });
+  });
+
+  it("accumulates pages_read, which discovery_runs has to report honestly", () => {
+    // Found in the spec 05 production verification: the counter was never
+    // advanced, so discovery_runs said pages_read=0 after two rounds that had
+    // plainly read pages. "Honest counts" is an acceptance criterion.
+    const after = advanceRun({ ...RUN, pagesRead: 4 }, {
+      outcome: "productive",
+      searchesUsed: 3,
+      pagesRead: 6,
+      written: { inserted: 1, updated: 0 },
+    } as never);
+
+    expect(after.pagesRead).toBe(10);
   });
 
   it("counts searches even on an empty round, so the budget still bites", () => {

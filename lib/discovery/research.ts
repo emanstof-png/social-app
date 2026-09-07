@@ -34,6 +34,8 @@ export type RunState = {
   /** Productive rounds only. An empty round does not increment this. */
   roundsDone: number;
   searchesUsed: number;
+  /** Pages actually fetched and sent to extraction, across every round. */
+  pagesRead: number;
   /** Consecutive. A productive round resets it. */
   emptyRounds: number;
   communitiesFound: number;

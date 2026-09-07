@@ -394,6 +394,7 @@ export function advanceRun(run: RunState, report: RoundReport): RunState {
     emptyRounds:
       report.outcome === "empty" ? run.emptyRounds + 1 : productive ? 0 : run.emptyRounds,
     searchesUsed: run.searchesUsed + report.searchesUsed,
+    pagesRead: run.pagesRead + report.pagesRead,
     communitiesFound: run.communitiesFound + report.written.inserted,
     lastError: failed ? report.why : run.lastError,
     status: failed ? "failed" : run.status,

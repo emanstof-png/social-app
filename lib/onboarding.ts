@@ -51,6 +51,16 @@ export function hasCompletedAssessment(state: string): boolean {
   return rank(state) >= rank("assessment_complete");
 }
 
+/**
+ * True once the focus set first had something in it, spec 04's step.
+ *
+ * Spec 05's Communities page gates on this: discovery searches for communities
+ * against the focus set, so without one there is nothing to search for.
+ */
+export function hasSelectedActivities(state: string): boolean {
+  return rank(state) >= rank("activities_selected");
+}
+
 /** Advances onboarding, never rewinds it. */
 export function advanceOnboarding(
   current: string,

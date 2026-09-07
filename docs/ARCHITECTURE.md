@@ -32,6 +32,21 @@ Every component defines: input schema (Zod), output schema (Zod), system prompt,
 
 No component uses Gemini's Google Search grounding. It is quota-blocked on the free key (reproducible 429 on grounded calls only) and no Google billing is being enabled, so `discovery_research` plans searches that the provider chain runs (spec 05).
 
+## Discovery (spec 05)
+Deterministic-first. The models fill two narrow joints and decide nothing else.
+
+**Search chain** (`lib/search/`) — mirrors the model gateway: `catalog.ts` holds the chain order (Exa → Tavily → Serper) and is the only place it lives; `providers.ts` has one adapter each, translating only; `chain.ts` owns fall-through, logging, URL normalization and dedupe. It skips a provider with no key, falls through on 429/402/auth/5xx/timeout, and **stops on the first provider that answers — including one that answers with zero results**, because that is a fact about the query, not a provider failure. Every attempt writes one `search_log` row, so a fall-through is a record rather than a gap. With no key at all it refuses and names the three variables; it never returns an empty list standing in for a failure.
+
+**Round engine** (`lib/discovery/`) — `research.ts` is pure (`nextStep`, `planFrom`, `selectPages`, `roundOutcome`, `mergeFindings`); `round.ts` runs one round with every impure edge injected, which is what lets `npm run discover -- --dry-run` run the same logic with the writes replaced. The loop is plan → search → read → extract → synthesize, ~3 rounds, budgets in `budget.ts`.
+
+**The empty-round rule.** A round that completes with a valid, schema-clean, empty result is a signal to re-query, never a completed round. Enforced in two places: `discovery_research` requires at least 3 queries unless it declares itself finished (so an empty list fails the output schema and the gateway's one-retry-then-raise catches it), and `roundOutcome` classifies a round that found nothing as `empty`, which does not increment `rounds_done`. `empty` and `failed` are kept strictly apart — a round whose extractions all *errored* is `failed` and stops; one whose extractions all *succeeded and found nothing* is `empty` and re-queries. Two consecutive empty rounds end the run with status `empty`, reported as having found nothing and never as a completed search.
+
+**Fetching** (`lib/discovery/fetch.ts`, `robots.ts`) — a fixed honest User-Agent, per-request timeout, size cap, deterministic HTML-to-text, no headless browser and no JS. robots.txt is fetched once per host per run. A disallowed URL is skipped entirely: not fetched, and never substituted with the page content Exa or Tavily would return, since using that would obey the letter and break the rule. An unreachable robots.txt counts as disallowed.
+
+**Facts and opinions never cross.** Discovery writes `website`, `calendar_url`, `location`, `cost`, `type`, `why_relevant`, `source_url`, `evidence`, `discovery_run_id`. The user owns `status`, `focus`, `user_notes`, `genre_liked`, which discovery never writes, and spec 05 makes no discovered fact editable. Keeping the two sets disjoint is why spec 05 needs no equivalent of spec 04's `kind_edited_by_user` flag.
+
+**One round per request.** A full run is 10–20 searches and 4–8 free-tier model calls, which will not finish inside a serverless function's time limit. Each request advances the run by one round and persists to `discovery_runs`, so an interrupted run is resumable rather than lost.
+
 ## Scraping strategy (spec 05)
 Order of preference per community: ICS feed → public API (Meetup/Eventbrite) → HTML page passed to `event_extraction` (LLM → schema). Dedupe on hash(community_id, title, starts_at). Respect robots.txt. Log failures to `run_log`; surface "calendar broken" badge in UI.
 

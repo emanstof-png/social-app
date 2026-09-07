@@ -36,6 +36,7 @@ const RUN: RunState = {
   phase: "idle",
   roundsDone: 0,
   searchesUsed: 0,
+  pagesRead: 0,
   emptyRounds: 0,
   communitiesFound: 0,
   lastError: null,

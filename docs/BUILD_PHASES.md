@@ -55,4 +55,4 @@ Two decisions were settled during spec 02 that change what specs 05 and 06 must 
 **Usable-daily target:** through spec 07.
 **Full spec:** through spec 11.
 
-Spec files 01–04 are written and built. Specs 05–11 get written when their phase starts (ask a planning chat to draft each from PRD + ARCHITECTURE, one at a time, so they reflect what actually got built).
+Spec files 01–05 are written and built. Specs 06–11 get written when their phase starts: ask a planning chat to draft each one per `docs/specs/README.md`, which sets the document kinds, the required sections and the reading a drafter does first, so each spec reflects what actually got built rather than what was planned. The code schema the spec writes against is `docs/CONVENTIONS.md`.

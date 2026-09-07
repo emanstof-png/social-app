@@ -189,8 +189,11 @@ export async function callGemini(
     },
   };
 
+  // No google_search entry: Gemini's built-in Search grounding is off the table
+  // (spec 05 addendum -- reproducible 429 on grounded calls only, on the free
+  // key, and no Google billing is being enabled). Search comes from the
+  // provider chain in lib/search/ instead.
   const tools: Record<string, unknown>[] = [];
-  if (request.googleSearch) tools.push({ google_search: {} });
   if (request.tools?.length) {
     tools.push({
       function_declarations: request.tools.map((tool) => ({

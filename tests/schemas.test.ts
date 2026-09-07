@@ -6,6 +6,15 @@ import {
   activitySuggestionInput,
   activitySuggestionOutput,
 } from "@/lib/llm/components/activity-suggestion";
+import {
+  discoveryExtractionOrganization,
+  discoveryExtractionOutput,
+} from "@/lib/llm/components/discovery-extraction";
+import {
+  MIN_QUERIES,
+  discoveryResearchInput,
+  discoveryResearchOutput,
+} from "@/lib/llm/components/discovery-research";
 import { interviewInput, interviewOutput } from "@/lib/llm/components/interview";
 import * as schemas from "@/lib/schemas";
 import { enumLabels, tableColumns } from "./migration-sql";
@@ -428,6 +437,134 @@ describe("activity_suggestion component schemas (spec 04 item 2)", () => {
   });
 });
 
+describe("discovery_research component schemas (spec 05 item 5)", () => {
+  const query = { query: "arlington contra dance club", why: "local, specific" };
+
+  it("accepts a normal round of queries", () => {
+    const parsed = discoveryResearchOutput.parse({
+      gaps: ["nothing found south of the river"],
+      queries: [query, query, query],
+      enough: false,
+    });
+    expect(parsed.queries).toHaveLength(3);
+  });
+
+  it("rejects an empty query list, which is the first half of the empty-round rule", () => {
+    // A schema-clean {"queries": []} sailing through would look like a
+    // finished round. Failing the component's own output schema means the
+    // gateway's existing one-retry-then-raise path catches and logs it free.
+    expect(() =>
+      discoveryResearchOutput.parse({ gaps: [], queries: [], enough: false }),
+    ).toThrow();
+  });
+
+  it("rejects fewer than the minimum when the round is not finished", () => {
+    expect(() =>
+      discoveryResearchOutput.parse({ queries: [query, query], enough: false }),
+    ).toThrow();
+    expect(MIN_QUERIES).toBe(3);
+  });
+
+  it("allows an empty query list only when the model says it is finished", () => {
+    const parsed = discoveryResearchOutput.parse({ queries: [], enough: true });
+    expect(parsed.enough).toBe(true);
+  });
+
+  it("caps a round at eight queries, which is the round's search budget", () => {
+    const many = Array.from({ length: 9 }, () => query);
+    expect(() =>
+      discoveryResearchOutput.parse({ queries: many, enough: false }),
+    ).toThrow();
+  });
+
+  it("requires a why for each query, so diversity can be judged", () => {
+    expect(() =>
+      discoveryResearchOutput.parse({
+        queries: [{ query: "x", why: "" }, query, query],
+        enough: false,
+      }),
+    ).toThrow();
+  });
+
+  it("defaults the round-1 inputs the plan step passes", () => {
+    const parsed = discoveryResearchInput.parse({
+      activity: "contra dance",
+      location: "Arlington, Virginia",
+    });
+    expect(parsed).toMatchObject({
+      round: 1,
+      found_so_far: [],
+      previous_queries: [],
+      focus_notes: "",
+    });
+  });
+});
+
+describe("discovery_extraction component schemas (spec 05 item 5)", () => {
+  const organization = {
+    name: "Friday Night Dancers",
+    why_relevant: "Weekly contra dance with a free beginner lesson.",
+    website: "https://www.fridaynightdance.com/",
+    calendar_url: null,
+    location: "Glen Echo, MD",
+    cost: "$15",
+    type: "community_event",
+    confidence: 0.9,
+  };
+
+  it("accepts a page that described an organization", () => {
+    const parsed = discoveryExtractionOutput.parse({
+      is_relevant: true,
+      organizations: [organization],
+    });
+    expect(parsed.organizations[0].name).toBe("Friday Night Dancers");
+  });
+
+  it("accepts an irrelevant page as a clean empty result", () => {
+    // A directory index is not an organization. This is a valid answer, and the
+    // round engine -- not the schema -- decides that a round of these is empty.
+    const parsed = discoveryExtractionOutput.parse({ is_relevant: false });
+    expect(parsed.organizations).toEqual([]);
+  });
+
+  it("never asks the model for the source URL", () => {
+    // research.ts stamps it from the page it actually fetched, so an
+    // organization the model invented has no page behind it.
+    expect(Object.keys(discoveryExtractionOrganization.shape)).not.toContain(
+      "source_url",
+    );
+  });
+
+  it("rejects a confidence outside 0-1", () => {
+    for (const confidence of [-0.1, 1.5]) {
+      expect(() =>
+        discoveryExtractionOutput.parse({
+          is_relevant: true,
+          organizations: [{ ...organization, confidence }],
+        }),
+      ).toThrow();
+    }
+  });
+
+  it("rejects a type the communities table cannot store", () => {
+    expect(() =>
+      discoveryExtractionOutput.parse({
+        is_relevant: true,
+        organizations: [{ ...organization, type: "club" }],
+      }),
+    ).toThrow();
+  });
+
+  it("requires a why_relevant, so a community cannot be relevant for no reason", () => {
+    expect(() =>
+      discoveryExtractionOutput.parse({
+        is_relevant: true,
+        organizations: [{ ...organization, why_relevant: "" }],
+      }),
+    ).toThrow();
+  });
+});
+
 describe("discovery and search schemas (spec 05 item 2)", () => {
   const base = {
     id: "11111111-1111-4111-8111-111111111111",
@@ -508,6 +645,7 @@ describe("discovery and search schemas (spec 05 item 2)", () => {
       communities_found: 0,
       empty_rounds: 2,
       last_error: null,
+      pages_seen: ["https://example.org/about"],
       started_at: "2026-09-06T10:00:00+00:00",
       finished_at: "2026-09-06T10:04:00+00:00",
     };

@@ -276,9 +276,6 @@ export async function runComponentWith<T = unknown>(
       maxOutputTokens: definition.maxOutputTokens,
       temperature: definition.temperature,
       tools: definition.tools,
-      // Gemini's built-in Google Search stands in for a separate search API on
-      // the one component that researches (STATUS.md, spec 05 TODO).
-      googleSearch: meta.requiresTools && provider === "gemini",
       signal,
     };
 

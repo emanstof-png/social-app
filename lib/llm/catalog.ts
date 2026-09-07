@@ -43,8 +43,14 @@ export const COMPONENTS: readonly ComponentMeta[] = [
     id: "discovery_research",
     label: "Discovery research",
     description:
-      "Multi-round deep research for local communities (spec 05). Needs a tool/search-capable model.",
-    requiresTools: true,
+      "Plans and critiques each round of community discovery (spec 05): what " +
+      "to search for next, given what has been found so far.",
+    // Was true, for Gemini's Google Search grounding. Search now comes from the
+    // provider chain in lib/search/, so a non-tool model is a perfectly good
+    // planner and telling the user otherwise in the dropdown would be false.
+    // The tools_unsupported gate itself stays in the gateway for a future
+    // component that does need tools; this was only its caller.
+    requiresTools: false,
   },
   {
     id: "discovery_extraction",
@@ -192,6 +198,26 @@ export const DEFAULT_MODEL_SETTINGS: Record<
     model: "minimax/minimax-m3:free",
     supports_tools: true,
   },
+  /**
+   * Spec 05 re-decided this rather than inheriting it: the old default was
+   * Gemini *because of grounding*, and grounding is gone.
+   *
+   * Plan and critique is where discovery quality is decided (the addendum names
+   * the critique step the top quality lever and query diversity the second),
+   * and both are this one component. Gemini 3.6 Flash is the pick on this
+   * repo's own evidence: spec 02 established that plain Gemini calls return 200
+   * in the same second a grounded call returns 429 -- only grounding was
+   * quota-blocked, and nothing sends grounded calls now. It is a thinking model
+   * on the free tier, which is what these two steps want. OpenRouter's free
+   * models sit on a shared upstream pool that returns 429 while the key is
+   * valid: tolerable for a step that can be retried, bad for the step every
+   * other step depends on.
+   *
+   * If discovery quality turns out poor in practice, try
+   * nvidia/nemotron-3-super-120b-a12b:free on OpenRouter here -- a larger model
+   * on a flakier pool, which is the right trade only once quality is the known
+   * problem. That is a dropdown change in Settings, not a code change.
+   */
   discovery_research: {
     provider: "gemini",
     model: "gemini-3.6-flash",

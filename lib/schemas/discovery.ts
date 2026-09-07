@@ -26,6 +26,13 @@ export const discoveryRunRow = timestampedRowBase.extend({
   empty_rounds: z.number().int().nonnegative(),
   /** The real provider or gateway message, shown with a Retry control. */
   last_error: z.string().nullable(),
+  /**
+   * Normalized URLs this run has finished with -- fetched, failed, or skipped
+   * for robots -- so a later round does not re-fetch and re-extract them
+   * (migration 0010). Each round is a separate request, so this is where the
+   * cross-round dedupe set lives.
+   */
+  pages_seen: z.array(z.string()),
   started_at: timestamptz,
   finished_at: timestamptz.nullable(),
 });
@@ -41,6 +48,7 @@ export const discoveryRunInsert = discoveryRunRow
     communities_found: true,
     empty_rounds: true,
     last_error: true,
+    pages_seen: true,
     started_at: true,
     finished_at: true,
   });

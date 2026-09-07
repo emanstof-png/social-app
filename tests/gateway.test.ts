@@ -267,55 +267,63 @@ describe("runComponentWith", () => {
     expect(callProvider).not.toHaveBeenCalled();
   });
 
-  it("refuses discovery_research on a model that does not support tools", async () => {
-    const { deps, logged, callProvider } = harness([], {
-      resolveModel: async () => ({
-        provider: "openrouter",
-        model: "some/textonly-model",
-        supports_tools: false,
-      }),
-    });
-
-    await expect(
-      runComponentWith(deps, "discovery_research", {
-        activity: "rucking",
-        location: "Arlington, VA",
-      }),
-    ).rejects.toMatchObject({ kind: "tools_unsupported" });
-
-    expect(callProvider).not.toHaveBeenCalled();
-    expect(logged[0]).toMatchObject({
-      status: "error",
-      error_kind: "tools_unsupported",
-      attempts: 0,
-    });
-  });
-
-  it("turns on Gemini google_search for the research component", async () => {
-    const { deps, callProvider } = harness([
-      reply(JSON.stringify({ communities: [], more_rounds_useful: false })),
-    ], {
-      resolveModel: async () => ({
-        provider: "gemini",
-        model: "gemini-3.6-flash",
-        supports_tools: true,
-      }),
-    });
+  /**
+   * Three tests lived here asserting the opposite: that discovery_research
+   * turned on Gemini's google_search, that other components left it off, and
+   * that discovery_research was refused on a model without tool support. All
+   * three asserted behaviour spec 05 deliberately removes on a settled decision
+   * (the addendum: grounded Gemini calls are quota-blocked on the free key, no
+   * Google billing is being enabled, and search now comes from the provider
+   * chain in lib/search/). They are replaced by the positive fact below.
+   *
+   * The tools_unsupported gate and its run_error_kind label both stay in the
+   * gateway for a future component that does need tools; only its one caller
+   * went away, which is why no test asserts the gate through
+   * discovery_research any more.
+   */
+  it("sends discovery_research with no tools and no grounding flag", async () => {
+    const { deps, callProvider } = harness(
+      [reply(JSON.stringify({ gaps: [], queries: [], enough: true }))],
+      {
+        resolveModel: async () => ({
+          provider: "gemini",
+          model: "gemini-3.6-flash",
+          supports_tools: true,
+        }),
+      },
+    );
 
     await runComponentWith(deps, "discovery_research", {
       activity: "rucking",
       location: "Arlington, VA",
     });
 
-    expect(callProvider.mock.calls[0][0].googleSearch).toBe(true);
+    const request = callProvider.mock.calls[0][0];
+    expect(request.tools).toBeUndefined();
+    expect(request).not.toHaveProperty("googleSearch");
   });
 
-  it("leaves google_search off for components that do not research", async () => {
-    const { deps, callProvider } = harness([reply(JSON.stringify(VALID_PERSONA))]);
+  it("runs discovery_research on a model with no tool support", async () => {
+    // It plans searches; it does not run them. Refusing a text-only model here
+    // would be false, and would rule out most of the free tier.
+    const { deps, callProvider } = harness(
+      [reply(JSON.stringify({ gaps: [], queries: [], enough: true }))],
+      {
+        resolveModel: async () => ({
+          provider: "openrouter",
+          model: "some/textonly-model",
+          supports_tools: false,
+        }),
+      },
+    );
 
-    await runComponentWith(deps, "persona_synthesis", PERSONA_INPUT);
+    const result = await runComponentWith(deps, "discovery_research", {
+      activity: "rucking",
+      location: "Arlington, VA",
+    });
 
-    expect(callProvider.mock.calls[0][0].googleSearch).toBe(false);
+    expect(callProvider).toHaveBeenCalled();
+    expect(result.output).toMatchObject({ enough: true });
   });
 
   it("honours an override model instead of model_settings, and links the rerun", async () => {

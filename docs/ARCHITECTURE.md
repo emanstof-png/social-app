@@ -28,7 +28,9 @@
 - `run_log` — component, model, input_ref, output_ref, tokens_in/out, cost_usd, latency_ms, created_at.
 
 ## Component → gateway contract
-Every component defines: input schema (Zod), output schema (Zod), system prompt, tools (if any). Gateway resolves model from `model_settings`, calls provider, validates output, retries once, logs to `run_log`. Components: `interview`, `persona_synthesis`, `activity_suggestion`, `discovery_research`, `event_extraction`, `weekly_planning`, `invite_suggestion`.
+Every component defines: input schema (Zod), output schema (Zod), system prompt, tools (if any). Gateway resolves model from `model_settings`, calls provider, validates output, retries once, logs to `run_log`. Components: `interview`, `persona_synthesis`, `activity_suggestion`, `discovery_research`, `discovery_extraction`, `event_extraction`, `weekly_planning`, `invite_suggestion`.
+
+No component uses Gemini's Google Search grounding. It is quota-blocked on the free key (reproducible 429 on grounded calls only) and no Google billing is being enabled, so `discovery_research` plans searches that the provider chain runs (spec 05).
 
 ## Scraping strategy (spec 05)
 Order of preference per community: ICS feed → public API (Meetup/Eventbrite) → HTML page passed to `event_extraction` (LLM → schema). Dedupe on hash(community_id, title, starts_at). Respect robots.txt. Log failures to `run_log`; surface "calendar broken" badge in UI.

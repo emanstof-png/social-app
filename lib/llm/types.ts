@@ -27,8 +27,6 @@ export type ChatRequest = {
   maxOutputTokens: number;
   temperature?: number;
   tools?: ToolDefinition[];
-  /** Enables Gemini's built-in Google Search grounding (discovery_research). */
-  googleSearch?: boolean;
   signal: AbortSignal;
 };
 

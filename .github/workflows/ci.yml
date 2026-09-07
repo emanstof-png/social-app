@@ -51,18 +51,19 @@ jobs:
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+      E2E_USER_ID: ${{ secrets.E2E_USER_ID }}
     steps:
       - name: Check for Supabase secrets
         id: secrets
         run: |
           missing=()
           for name in NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_ANON_KEY \
-                      SUPABASE_SERVICE_ROLE_KEY ENCRYPTION_KEY; do
+                      SUPABASE_SERVICE_ROLE_KEY ENCRYPTION_KEY E2E_USER_ID; do
             if [ -z "${!name}" ]; then missing+=("$name"); fi
           done
           if [ ${#missing[@]} -eq 0 ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
-            echo "All four secrets are set; running the Playwright login test."
+            echo "All five secrets are set; running the Playwright login test."
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
             echo "SKIPPING Playwright: repository secrets not set: ${missing[*]}"

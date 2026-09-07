@@ -12,7 +12,9 @@
     "test:watch": "vitest",
     "test:e2e": "next build && playwright test",
     "prepare": "husky",
-    "discover": "tsx --env-file=.env.local scripts/discover.ts"
+    "discover": "tsx --env-file=.env.local scripts/discover.ts",
+    "setup:e2e-user": "tsx --env-file=.env.local scripts/setup-e2e-user.ts",
+    "verify:e2e-isolation": "tsx --env-file=.env.local scripts/verify-e2e-isolation.ts"
   },
   "lint-staged": {
     "*.{ts,tsx,mts,mjs}": "eslint --fix --no-warn-ignored"

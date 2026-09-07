@@ -20,12 +20,16 @@ import { CONSTRAINT_QUESTIONS, encodeInventorySelection } from "../lib/assessmen
  *
  * The generated persona is seeded the same way, for the same reason.
  *
+ * Spec 06 item 0: the account is a pinned id (`E2E_USER_ID`), created once by
+ * `npm run setup:e2e-user`, not an email with a hardcoded fallback -- see
+ * `e2e/login.spec.ts` for why. `resetUser` below deletes rows for this id
+ * alone, so a missing `E2E_USER_ID` must fail the suite, never default to an
+ * account that might be real.
+ *
  * Required environment (in CI these are repository secrets; see REVIEW.md):
  *   NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY,
- *   SUPABASE_SERVICE_ROLE_KEY, ENCRYPTION_KEY
+ *   SUPABASE_SERVICE_ROLE_KEY, ENCRYPTION_KEY, E2E_USER_ID
  */
-
-const TEST_EMAIL = process.env.E2E_TEST_EMAIL ?? "e2e+gazelle@example.com";
 
 /** One inventory, so the seed stays small. */
 const INVENTORY_ID = "social_style";
@@ -52,34 +56,22 @@ function adminClient(): SupabaseClient {
   );
 }
 
-async function ensureTestUser(admin: SupabaseClient): Promise<string> {
-  const { data, error } = await admin.auth.admin.createUser({
-    email: TEST_EMAIL,
-    email_confirm: true,
-  });
-
-  if (!error && data.user) return data.user.id;
-
-  const alreadyExists =
-    error?.code === "email_exists" ||
-    (error ? /already (been )?registered|exists/i.test(error.message) : false);
-  if (!alreadyExists) {
-    throw new Error(`Could not create the e2e user: ${error?.message}`);
+/** Resolves the pinned e2e user's email; fails loudly if the id is stale. */
+async function testUserEmail(admin: SupabaseClient, userId: string): Promise<string> {
+  const { data, error } = await admin.auth.admin.getUserById(userId);
+  if (error || !data.user?.email) {
+    throw new Error(
+      `E2E_USER_ID (${userId}) does not resolve to a real user: ` +
+        `${error?.message ?? "not found"}. Run \`npm run setup:e2e-user\`.`,
+    );
   }
-
-  // listUsers is the only lookup-by-email the admin API offers.
-  const { data: list, error: listError } = await admin.auth.admin.listUsers();
-  if (listError) throw new Error(`Could not look up the e2e user: ${listError.message}`);
-
-  const user = list.users.find((one) => one.email === TEST_EMAIL);
-  if (!user) throw new Error(`The e2e user ${TEST_EMAIL} does not exist and could not be created.`);
-  return user.id;
+  return data.user.email;
 }
 
-async function magicLinkTokenHash(admin: SupabaseClient): Promise<string> {
+async function magicLinkTokenHash(admin: SupabaseClient, email: string): Promise<string> {
   const { data, error } = await admin.auth.admin.generateLink({
     type: "magiclink",
-    email: TEST_EMAIL,
+    email,
   });
 
   if (error) throw new Error(`Could not generate a magic link: ${error.message}`);
@@ -180,11 +172,12 @@ test.describe("assessment", () => {
 
   test.beforeEach(async ({ page }) => {
     admin = adminClient();
-    userId = await ensureTestUser(admin);
+    userId = required("E2E_USER_ID");
+    const email = await testUserEmail(admin, userId);
     await resetUser(admin, userId);
     await setOnboarding(admin, userId, "assessment_started");
 
-    const tokenHash = await magicLinkTokenHash(admin);
+    const tokenHash = await magicLinkTokenHash(admin, email);
     const response = await page.goto(
       `/auth/callback?token_hash=${encodeURIComponent(tokenHash)}` +
         `&type=magiclink&next=${encodeURIComponent("/")}`,

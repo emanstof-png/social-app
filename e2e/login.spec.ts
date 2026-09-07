@@ -14,13 +14,15 @@ import { expect, test } from "@playwright/test";
  * Assessment and event-selection flows (spec 12 item 2's other two) are
  * deferred until specs 03 and 07 build them.
  *
+ * Spec 06 item 0: the account is a pinned id (`E2E_USER_ID`), created once by
+ * `npm run setup:e2e-user`, not an email with a hardcoded fallback. There is
+ * no default -- an unset `E2E_USER_ID` fails the suite loudly instead of
+ * silently running against whatever `e2e+gazelle@example.com` used to mean.
+ *
  * Required environment (in CI these are repository secrets; see REVIEW.md):
  *   NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY,
- *   SUPABASE_SERVICE_ROLE_KEY, ENCRYPTION_KEY
+ *   SUPABASE_SERVICE_ROLE_KEY, ENCRYPTION_KEY, E2E_USER_ID
  */
-
-/** A dedicated account, so a CI run never touches the real user's data. */
-const TEST_EMAIL = process.env.E2E_TEST_EMAIL ?? "e2e+gazelle@example.com";
 
 function required(name: string): string {
   const value = process.env[name];
@@ -43,26 +45,23 @@ function adminClient(): SupabaseClient {
   );
 }
 
-/** Idempotent: re-running must not create a second test user. */
-async function ensureTestUser(admin: SupabaseClient): Promise<void> {
-  const { error } = await admin.auth.admin.createUser({
-    email: TEST_EMAIL,
-    email_confirm: true,
-  });
-
-  if (!error) return;
-  const alreadyExists =
-    error.code === "email_exists" || /already (been )?registered|exists/i.test(error.message);
-  if (!alreadyExists) {
-    throw new Error(`Could not create the e2e user: ${error.message}`);
+/** Resolves the pinned e2e user's email; fails loudly if the id is stale. */
+async function testUserEmail(admin: SupabaseClient, userId: string): Promise<string> {
+  const { data, error } = await admin.auth.admin.getUserById(userId);
+  if (error || !data.user?.email) {
+    throw new Error(
+      `E2E_USER_ID (${userId}) does not resolve to a real user: ` +
+        `${error?.message ?? "not found"}. Run \`npm run setup:e2e-user\`.`,
+    );
   }
+  return data.user.email;
 }
 
 /** The `token_hash` half of a magic link, for the app's own callback route. */
-async function magicLinkTokenHash(admin: SupabaseClient): Promise<string> {
+async function magicLinkTokenHash(admin: SupabaseClient, email: string): Promise<string> {
   const { data, error } = await admin.auth.admin.generateLink({
     type: "magiclink",
-    email: TEST_EMAIL,
+    email,
   });
 
   if (error) throw new Error(`Could not generate a magic link: ${error.message}`);
@@ -82,8 +81,8 @@ test.describe("login", () => {
 
   test("the magic-link callback signs in and /settings renders", async ({ page }) => {
     const admin = adminClient();
-    await ensureTestUser(admin);
-    const tokenHash = await magicLinkTokenHash(admin);
+    const email = await testUserEmail(admin, required("E2E_USER_ID"));
+    const tokenHash = await magicLinkTokenHash(admin, email);
 
     const response = await page.goto(
       `/auth/callback?token_hash=${encodeURIComponent(tokenHash)}` +

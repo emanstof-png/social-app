@@ -284,6 +284,9 @@ async function main() {
       for (const row of plan.dropped) {
         console.log(`    - ${row.name}: ${row.reason}`);
       }
+      for (const row of plan.ambiguous) {
+        console.log(`    ? ${row.name}: ${row.reason}`);
+      }
       wouldInsert += plan.inserts.length;
       // Reported as written so the run counters advance as they would in
       // production; nothing reached the database.

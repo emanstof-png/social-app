@@ -150,7 +150,7 @@ export async function runOneRound(
         searchError: null,
       },
       plan,
-      mergePlan: { inserts: [], updates: [], dropped: [] },
+      mergePlan: { inserts: [], updates: [], dropped: [], ambiguous: [] },
       written: { inserted: 0, updated: 0 },
       skipped: [],
       pagesSeen: [],
@@ -207,7 +207,7 @@ export async function runOneRound(
     return finish({
       round,
       plan,
-      mergePlan: { inserts: [], updates: [], dropped: [] },
+      mergePlan: { inserts: [], updates: [], dropped: [], ambiguous: [] },
       written: { inserted: 0, updated: 0 },
       skipped: [],
       pagesSeen: [],
@@ -321,6 +321,11 @@ export async function runOneRound(
   const mergePlan = mergeFindings(existing, findings, context.runId);
   for (const drop of mergePlan.dropped) {
     say(`  DROPPED ${drop.name}: ${drop.reason}`);
+  }
+  // Written, not skipped: the name match was taken. Said out loud because only
+  // a person can settle whether the two rows are one organization.
+  for (const clash of mergePlan.ambiguous) {
+    say(`  AMBIGUOUS ${clash.name}: ${clash.reason}`);
   }
 
   // Written at the end of each round, not the end of the run, so a run that

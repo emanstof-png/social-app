@@ -459,11 +459,51 @@ export type MergePlan = {
   inserts: CommunityInsertPayload[];
   updates: { id: string; name: string; changes: Record<string, unknown> }[];
   dropped: { name: string; reason: string }[];
+  /**
+   * A finding whose name key and website key pointed at two different existing
+   * rows. The name match wins and the finding is still written, so this is not
+   * a drop -- it is the round saying out loud that two stored rows may be one
+   * organization, which is a thing a person has to settle by archiving one.
+   */
+  ambiguous: { name: string; reason: string }[];
 };
 
 /** The unique index's key: `lower(btrim(name))`. */
 export function nameKey(name: string): string {
   return name.trim().toLowerCase();
+}
+
+/**
+ * The key `mergeFindings` actually matches on: `nameKey` plus the naming
+ * variants that the database index cannot see through. The spec 05 live run
+ * wrote "Folklore Society of Greater Washington (FSGW)" and "The Folklore
+ * Society of Greater Washington (FSGW)" as two rows for one organization.
+ *
+ * **Broader than `nameKey` in that direction and only in that direction.**
+ * Matching more names than the index does means an update where there would
+ * otherwise have been an insert the index would have rejected anyway. A key
+ * *narrower* than the index would instead produce insert failures, so `nameKey`
+ * itself is never loosened -- it stays the description of what the index
+ * enforces.
+ *
+ * Deliberately not fuzzy: no scoring, no substring containment, no model call.
+ * A parent society and its named dance share most of their words and are two
+ * organizations; that pair is settled by the website key, not this one.
+ */
+export function matchKey(name: string): string {
+  let key = nameKey(name);
+
+  // A trailing initialism: "... washington (fsgw)". Letters only, so a
+  // qualifier like "(arlington va)" still tells two organizations apart.
+  key = key.replace(/\s*\([a-z]+\)$/, "");
+
+  // Separator punctuation carries no meaning of its own, and an en dash, an em
+  // dash and a hyphen are the same separator typed three ways.
+  key = key.replace(/[‐-―\-:]/g, " ");
+
+  key = key.replace(/^the\s+/, "");
+
+  return key.replace(/\s+/g, " ").trim();
 }
 
 /**
@@ -504,15 +544,36 @@ export function mergeFindings(
   findings: Finding[],
   runId: string,
 ): MergePlan {
-  const byName = new Map(existing.map((row) => [nameKey(row.name), row]));
+  // Keyed on matchKey, not nameKey. Two existing rows can now collapse to one
+  // key -- exactly the duplicates this exists to stop creating more of -- so the
+  // first wins rather than the last, which keeps the choice stable across runs
+  // until one of the pair is archived by hand.
+  const byName = new Map<string, ExistingCommunity>();
+  for (const row of existing) {
+    const key = matchKey(row.name);
+    if (!byName.has(key)) byName.set(key, row);
+  }
+
+  // The second key. Full normalized URL, never the host: two dances under one
+  // parent society's site are two organizations and stay two rows. Null is
+  // common, so this supplements the name key and cannot replace it.
+  const byWebsite = new Map<string, ExistingCommunity>();
+  for (const row of existing) {
+    if (row.website === null) continue;
+    const key = normalizeUrl(row.website);
+    if (!byWebsite.has(key)) byWebsite.set(key, row);
+  }
+
   const inserts: CommunityInsertPayload[] = [];
   const updates: MergePlan["updates"] = [];
   const dropped: MergePlan["dropped"] = [];
+  const ambiguous: MergePlan["ambiguous"] = [];
   const seenThisRound = new Set<string>();
+  const websitesThisRound = new Set<string>();
 
   for (const finding of findings) {
     const name = finding.name.trim();
-    const key = nameKey(name);
+    const key = matchKey(name);
 
     if (!name) {
       dropped.push({ name: finding.name, reason: "The organization had no name." });
@@ -545,16 +606,38 @@ export function mergeFindings(
       continue;
     }
 
-    // Two findings for one organization in a single round. The unique index
-    // would reject the second, and two rows for one real-world organization is
-    // the duplication the index exists to prevent.
-    if (seenThisRound.has(key)) {
+    const websiteKey = finding.website === null ? null : normalizeUrl(finding.website);
+
+    // Two findings for one organization in a single round. On an identical name
+    // the unique index would reject the second anyway; on a naming variant it
+    // would accept it, which is how spec 05 wrote one dance twice. Matching on
+    // matchKey here is what makes the second case a drop rather than a row.
+    // Both keys are checked, or a round could still write one organization
+    // twice under two names that happen to share a website.
+    if (seenThisRound.has(key) || (websiteKey !== null && websitesThisRound.has(websiteKey))) {
       dropped.push({ name, reason: "Already found earlier in this same round." });
       continue;
     }
     seenThisRound.add(key);
+    if (websiteKey !== null) websitesThisRound.add(websiteKey);
 
-    const found = byName.get(key);
+    // Name first, website second (addendum point 3). When the two disagree the
+    // name match wins and the disagreement is recorded rather than resolved
+    // silently: two stored rows may be one organization, and only a person can
+    // settle that by archiving one.
+    const byNameMatch = byName.get(key);
+    const byWebsiteMatch = websiteKey === null ? undefined : byWebsite.get(websiteKey);
+    const found = byNameMatch ?? byWebsiteMatch;
+
+    if (byNameMatch && byWebsiteMatch && byNameMatch.id !== byWebsiteMatch.id) {
+      ambiguous.push({
+        name,
+        reason:
+          `matched "${byNameMatch.name}" (${byNameMatch.id}) by name and ` +
+          `"${byWebsiteMatch.name}" (${byWebsiteMatch.id}) by website. Took the ` +
+          "name match. These two rows may be one organization.",
+      });
+    }
 
     if (!found) {
       inserts.push({
@@ -596,7 +679,7 @@ export function mergeFindings(
     }
   }
 
-  return { inserts, updates, dropped };
+  return { inserts, updates, dropped, ambiguous };
 }
 
 /** Structural comparison, so an unchanged `evidence` object is not a write. */

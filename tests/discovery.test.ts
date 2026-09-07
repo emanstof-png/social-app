@@ -505,6 +505,209 @@ describe("mergeFindings", () => {
   });
 });
 
+// -- mergeFindings: naming variants -----------------------------------------
+
+/**
+ * The 05 duplicate-names addendum, item 0 of spec 06. The live spec 05 run wrote
+ * one organization twice under two spellings, which the unique index on
+ * lower(btrim(name)) cannot see through. These are the naming variants the
+ * broader app-side match key has to collapse -- and, just as important, the ones
+ * it must not.
+ */
+describe("mergeFindings: the broader match key", () => {
+  const FSGW = "Folklore Society of Greater Washington (FSGW)";
+
+  it("matches across a leading 'The'", () => {
+    const plan = mergeFindings(
+      [existing({ name: FSGW })],
+      [finding({ name: `The ${FSGW}`, cost: "$12" })],
+      "run-1",
+    );
+
+    expect(plan.inserts).toEqual([]);
+    expect(plan.updates).toHaveLength(1);
+    expect(plan.updates[0].changes).toMatchObject({ cost: "$12" });
+  });
+
+  it("matches across a trailing parenthetical acronym", () => {
+    const plan = mergeFindings(
+      [existing({ name: "Folklore Society of Greater Washington" })],
+      [finding({ name: FSGW })],
+      "run-1",
+    );
+
+    expect(plan.inserts).toEqual([]);
+    expect(plan.updates).toHaveLength(1);
+  });
+
+  it("matches an en dash against a hyphen", () => {
+    const plan = mergeFindings(
+      [existing({ name: "Folklore Society of Greater Washington – Silver Spring Contra Dance" })],
+      [
+        finding({
+          name: "Folklore Society of Greater Washington - Silver Spring Contra Dance",
+          cost: "$10",
+        }),
+      ],
+      "run-1",
+    );
+
+    expect(plan.inserts).toEqual([]);
+    expect(plan.updates[0].changes).toMatchObject({ cost: "$10" });
+  });
+
+  it("treats two spellings of one organization in a single round as one row", () => {
+    // Both spellings have distinct lower(btrim(name)) keys, so the database
+    // index would accept both inserts. This is where the duplicate came from.
+    const plan = mergeFindings(
+      [],
+      [finding({ name: FSGW }), finding({ name: `The ${FSGW}` })],
+      "run-1",
+    );
+
+    expect(plan.inserts).toHaveLength(1);
+    expect(plan.dropped[0]).toMatchObject({ reason: expect.stringMatching(/round/i) });
+  });
+
+  it("never renames the existing row", () => {
+    // Addendum point 4: the first name a run stored wins, so anything already
+    // pointing at the row keeps pointing at it.
+    const plan = mergeFindings(
+      [existing({ name: FSGW })],
+      [finding({ name: `The ${FSGW}`, cost: "$12" })],
+      "run-1",
+    );
+
+    expect(Object.keys(plan.updates[0].changes)).not.toContain("name");
+  });
+
+  it("does not match one organization against another that merely contains its name", () => {
+    // No substring containment: the parent society's own row and its named
+    // dance are two organizations. This pair is settled by the website key.
+    const plan = mergeFindings(
+      [existing({ name: "Folklore Society of Greater Washington – Silver Spring Contra Dance" })],
+      [finding({ name: "Silver Spring Contra Dance", website: null })],
+      "run-1",
+    );
+
+    expect(plan.inserts).toHaveLength(1);
+    expect(plan.updates).toEqual([]);
+  });
+});
+
+// -- mergeFindings: the website key -----------------------------------------
+
+/**
+ * The addendum's second key. `website` is nullable and often null, so this
+ * supplements the name key rather than replacing it, and it compares the full
+ * normalized URL rather than the host: two dances under one parent society's
+ * site are two organizations.
+ */
+describe("mergeFindings: the website key", () => {
+  it("updates on a website match even when the names do not match", () => {
+    const plan = mergeFindings(
+      [existing({ name: "Friday Night Dance Society" })],
+      [finding({ name: "Friday Night Dancers", cost: "$20" })],
+      "run-1",
+    );
+
+    expect(plan.inserts).toEqual([]);
+    expect(plan.updates).toHaveLength(1);
+    expect(plan.updates[0].id).toBe("c1");
+    expect(plan.updates[0].changes).toMatchObject({ cost: "$20" });
+  });
+
+  it("compares the normalized URL, so a trailing slash is not a second organization", () => {
+    const plan = mergeFindings(
+      [existing({ name: "Friday Night Dance Society", website: "https://www.fridaynightdance.com" })],
+      [
+        finding({
+          name: "Friday Night Dancers",
+          website: "https://www.fridaynightdance.com/?utm_source=exa",
+        }),
+      ],
+      "run-1",
+    );
+
+    expect(plan.inserts).toEqual([]);
+    expect(plan.updates).toHaveLength(1);
+  });
+
+  it("keeps two organizations under one parent site as two rows", () => {
+    // Same host, different paths. Host-only matching would merge these.
+    const plan = mergeFindings(
+      [
+        existing({
+          id: "c1",
+          name: "FSGW Silver Spring Contra Dance",
+          website: "https://fsgw.org/silver-spring",
+        }),
+      ],
+      [
+        finding({
+          name: "FSGW Sunday Night Dance",
+          website: "https://fsgw.org/sunday-night",
+          source_url: "https://fsgw.org/sunday-night",
+        }),
+      ],
+      "run-1",
+    );
+
+    expect(plan.updates).toEqual([]);
+    expect(plan.inserts).toHaveLength(1);
+  });
+
+  it("does not match two organizations that both have no website", () => {
+    const plan = mergeFindings(
+      [existing({ name: "Arlington Hiking Club", website: null })],
+      [finding({ name: "Vienna Bird Walks", website: null })],
+      "run-1",
+    );
+
+    expect(plan.updates).toEqual([]);
+    expect(plan.inserts).toHaveLength(1);
+  });
+
+  it("takes the name match and records the ambiguity when the two keys disagree", () => {
+    const plan = mergeFindings(
+      [
+        existing({ id: "c1", name: "Friday Night Dancers", website: "https://elsewhere.example.org" }),
+        existing({ id: "c2", name: "A Different Organization" }),
+      ],
+      [finding({ cost: "$20" })],
+      "run-1",
+    );
+
+    expect(plan.inserts).toEqual([]);
+    expect(plan.updates).toHaveLength(1);
+    expect(plan.updates[0].id).toBe("c1");
+    expect(plan.ambiguous).toHaveLength(1);
+    expect(plan.ambiguous[0]).toMatchObject({
+      name: "Friday Night Dancers",
+      reason: expect.stringMatching(/c2/),
+    });
+  });
+
+  it("reports no ambiguity when both keys agree on the same row", () => {
+    const plan = mergeFindings([existing()], [finding({ cost: "$20" })], "run-1");
+    expect(plan.ambiguous).toEqual([]);
+  });
+
+  it("keeps the first of two findings sharing a website in one round", () => {
+    // The same guard as the name key, applied to the second key. Without it a
+    // single round can still write one organization twice.
+    const plan = mergeFindings(
+      [],
+      [finding({ name: "Friday Night Dancers" }), finding({ name: "Friday Night Dance Society" })],
+      "run-1",
+    );
+
+    expect(plan.inserts).toHaveLength(1);
+    expect(plan.inserts[0].name).toBe("Friday Night Dancers");
+    expect(plan.dropped[0]).toMatchObject({ reason: expect.stringMatching(/round/i) });
+  });
+});
+
 // -- nextStep ---------------------------------------------------------------
 
 describe("nextStep", () => {

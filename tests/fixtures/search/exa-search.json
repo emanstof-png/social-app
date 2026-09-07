@@ -1,0 +1,28 @@
+{
+  "requestId": "7d5d6a31b96e1e273a1a31fcbfcd9c79",
+  "resolvedSearchType": "",
+  "results": [
+    {
+      "id": "https://www.fridaynightdance.com/about",
+      "title": "About FND's Dance — Friday Night Dancers",
+      "url": "https://www.fridaynightdance.com/about"
+    },
+    {
+      "id": "https://www.fridaynightdance.com/",
+      "title": "Friday Night Dancers",
+      "url": "https://www.fridaynightdance.com/"
+    },
+    {
+      "id": "http://www.contradancelinks.com/schedule_VA.html",
+      "title": "Virginia Contra Dance, Square Dance, and Waltz Schedule",
+      "url": "http://www.contradancelinks.com/schedule_VA.html"
+    }
+  ],
+  "searchTime": 5.4,
+  "costDollars": {
+    "total": 0.007,
+    "search": {
+      "neural": 0.007
+    }
+  }
+}

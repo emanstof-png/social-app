@@ -14,6 +14,7 @@ import { ModelSettings } from "./model-settings";
 import { OnboardingStep } from "./onboarding-step";
 import { ProviderKeys, type KeyStatus } from "./provider-keys";
 import { RunLog, type RunLogEntry } from "./run-log";
+import { SearchLog, type SearchLogEntry } from "./search-log";
 import { SearchProviders } from "./search-providers";
 
 export const metadata = { title: "Settings — gazelle" };
@@ -42,8 +43,13 @@ export default async function SettingsPage() {
   // Idempotent: fills in only the components the user has not chosen.
   await seedDefaultModelSettings(supabase, user.id);
 
-  const [{ data: settingsRows }, { data: keyRows }, { data: profile }, { data: runRows }] =
-    await Promise.all([
+  const [
+    { data: settingsRows },
+    { data: keyRows },
+    { data: profile },
+    { data: runRows },
+    { data: searchRows },
+  ] = await Promise.all([
       supabase
         .from("model_settings")
         .select("component, provider, model, supports_tools")
@@ -63,6 +69,15 @@ export default async function SettingsPage() {
           "id, created_at, component, provider, model, status, error_kind, " +
             "error_message, tokens_in, tokens_out, cost_usd, latency_ms, " +
             "attempts, rerun_of, input_ref, output_ref",
+        )
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(100),
+      supabase
+        .from("search_log")
+        .select(
+          "id, created_at, provider, query, discovery_run_id, result_count, " +
+            "status, error_kind, error_message, latency_ms",
         )
         .eq("user_id", user.id)
         .order("created_at", { ascending: false })
@@ -117,6 +132,7 @@ export default async function SettingsPage() {
   ).length;
 
   const entries = (runRows ?? []) as unknown as RunLogEntry[];
+  const searchEntries = (searchRows ?? []) as unknown as SearchLogEntry[];
 
   return (
     <div className="flex max-w-4xl flex-col gap-10">
@@ -180,6 +196,18 @@ export default async function SettingsPage() {
           </p>
         </div>
         <RunLog entries={entries} modelsByProvider={modelsByProvider} />
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <div>
+          <h2 className="text-lg font-medium">Searches</h2>
+          <p className="mt-1 text-sm opacity-70">
+            Every search API call, successful or not, so a fall-through from one
+            provider to the next is a record rather than a gap. Zero results is
+            an answer, not a failure.
+          </p>
+        </div>
+        <SearchLog entries={searchEntries} />
       </section>
     </div>
   );

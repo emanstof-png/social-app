@@ -1,0 +1,65 @@
+{
+  "searchParameters": {
+    "q": "contra dance club Arlington Virginia",
+    "type": "search",
+    "num": 3,
+    "engine": "google"
+  },
+  "organic": [
+    {
+      "title": "Virginia Contra Dance, Square Dance, and Waltz Schedule",
+      "link": "http://www.contradancelinks.com/schedule_VA.html",
+      "snippet": "Arlington - Techno Contra: 1101 Wilson Boulevard. Admission: $6.00 for Members; $6.00 $8.00 for Non-Members. Time: 7:30pm to 11:00pm.",
+      "position": 1
+    },
+    {
+      "title": "Best country line dancing near Clarendon, Arlington, VA ...",
+      "link": "https://m.yelp.com/search?find_desc=country+line+dancing&find_loc=Clarendon%2C+Arlington%2C+VA+22201",
+      "snippet": "2854 Wilson Blvd, Arlington, VA 22201 (571) 312-0130 … for their swing and contra dances many times. (Contra dancing is basically country line dancing with a ...",
+      "rating": 3.8,
+      "ratingCount": 10831,
+      "position": 2
+    },
+    {
+      "title": "Shenandoah Valley Contra Dance | Verona VA",
+      "link": "https://www.facebook.com/ShenandoahValleyContraDance/",
+      "snippet": "SVCD is a non-profit dance organization in VA that hosts Monday Night contra dances once a month. Verona Community Center at 7 pm on Monday, August 10!",
+      "position": 3
+    }
+  ],
+  "peopleAlsoAsk": [
+    {
+      "question": "What do people wear contra dancing?"
+    },
+    {
+      "question": "What are the best nightlife clubs in Arlington, VA?"
+    },
+    {
+      "question": "What kind of dance is contra?"
+    },
+    {
+      "question": "Which neighborhood in Arlington, VA is considered the safest to live in?"
+    }
+  ],
+  "relatedSearches": [
+    {
+      "query": "Contra dance club arlington virginia reviews"
+    },
+    {
+      "query": "Contra dance club arlington virginia schedule"
+    },
+    {
+      "query": "Contra dance weekends 2026"
+    },
+    {
+      "query": "Floyd Contra Dance"
+    },
+    {
+      "query": "Glen Echo Contra Dance"
+    },
+    {
+      "query": "Contra Dance weekends 2026 schedule"
+    }
+  ],
+  "credits": 1
+}

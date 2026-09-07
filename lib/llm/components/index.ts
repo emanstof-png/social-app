@@ -2,6 +2,7 @@ import type { LlmComponent } from "../../schemas/enums";
 import type { ComponentDefinition } from "../component";
 
 import { activitySuggestionComponent } from "./activity-suggestion";
+import { discoveryExtractionComponent } from "./discovery-extraction";
 import { discoveryResearchComponent } from "./discovery-research";
 import { eventExtractionComponent } from "./event-extraction";
 import { interviewComponent } from "./interview";
@@ -19,6 +20,7 @@ export const COMPONENT_REGISTRY: Record<LlmComponent, ComponentDefinition> = {
   persona_synthesis: personaSynthesisComponent,
   activity_suggestion: activitySuggestionComponent,
   discovery_research: discoveryResearchComponent,
+  discovery_extraction: discoveryExtractionComponent,
   event_extraction: eventExtractionComponent,
   weekly_planning: weeklyPlanningComponent,
   invite_suggestion: inviteSuggestionComponent,

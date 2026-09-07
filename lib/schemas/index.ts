@@ -16,3 +16,5 @@ export * from "./event";
 export * from "./evaluation";
 export * from "./crm";
 export * from "./llm";
+export * from "./discovery";
+export * from "./search";

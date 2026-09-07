@@ -45,6 +45,12 @@ export const llmComponent = z.enum([
   "event_extraction",
   "weekly_planning",
   "invite_suggestion",
+  /**
+   * Spec 05. Added by `alter type ... add value` in migration 0008, so in
+   * Postgres it sits at the end of the enum rather than next to
+   * discovery_research; the order of labels here is cosmetic either way.
+   */
+  "discovery_extraction",
 ]);
 
 export const llmProvider = z.enum([
@@ -56,6 +62,26 @@ export const llmProvider = z.enum([
 ]);
 
 export const recordStatus = z.enum(["active", "archived"]);
+
+/**
+ * Spec 05. The search provider chain, in fall-through order. The order that
+ * matters at runtime lives in lib/search/catalog.ts; this only has to match the
+ * labels of public.search_provider.
+ */
+export const searchProvider = z.enum(["exa", "tavily", "serper"]);
+
+/**
+ * Spec 05. `empty` is deliberately distinct from `complete`: a run that found
+ * nothing reports that it found nothing rather than presenting itself as a
+ * finished search. `failed` is distinct again -- a provider or gateway error,
+ * which is not the same thing as having searched and found nothing.
+ */
+export const discoveryRunStatus = z.enum([
+  "running",
+  "complete",
+  "failed",
+  "empty",
+]);
 
 export type ActivitySource = z.infer<typeof activitySource>;
 export type ActivityStatus = z.infer<typeof activityStatus>;
@@ -71,3 +97,5 @@ export type InviteSuggestionStatus = z.infer<typeof inviteSuggestionStatus>;
 export type LlmComponent = z.infer<typeof llmComponent>;
 export type LlmProvider = z.infer<typeof llmProvider>;
 export type RecordStatus = z.infer<typeof recordStatus>;
+export type SearchProvider = z.infer<typeof searchProvider>;
+export type DiscoveryRunStatus = z.infer<typeof discoveryRunStatus>;

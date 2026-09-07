@@ -47,6 +47,14 @@ export const COMPONENTS: readonly ComponentMeta[] = [
     requiresTools: true,
   },
   {
+    id: "discovery_extraction",
+    label: "Discovery extraction",
+    description:
+      "Reads one fetched page and pulls the organizations off it (spec 05). " +
+      "Volume work: up to ten calls a round.",
+    requiresTools: false,
+  },
+  {
     id: "event_extraction",
     label: "Event extraction",
     description: "Pulls structured events out of scraped pages (spec 06).",
@@ -187,6 +195,19 @@ export const DEFAULT_MODEL_SETTINGS: Record<
   discovery_research: {
     provider: "gemini",
     model: "gemini-3.6-flash",
+    supports_tools: true,
+  },
+  /**
+   * Spec 05: the two discovery joints default to different providers on
+   * purpose. This one is per-page volume work -- up to MAX_PAGES_PER_ROUND
+   * calls a round, reading a page rather than reasoning about strategy -- so a
+   * 429 here costs one page, which the round engine drops with the reason
+   * logged. Spreading the two joints across two providers also means one
+   * provider's bad afternoon degrades a run instead of ending it.
+   */
+  discovery_extraction: {
+    provider: "openrouter",
+    model: "minimax/minimax-m3:free",
     supports_tools: true,
   },
   event_extraction: {

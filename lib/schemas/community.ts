@@ -20,6 +20,23 @@ export const communityRow = timestampedRowBase.extend({
   genre_liked: z.boolean().nullable(),
   /** "one of my few current communities" (PRD 1.7). */
   focus: z.boolean(),
+
+  // Spec 05, migration 0009. Discovered facts: written by a discovery run,
+  // never edited by the user in this spec. The user owns status, focus,
+  // user_notes and genre_liked above, which discovery never writes. Keeping the
+  // two sets disjoint is why this spec needs no equivalent of spec 04's
+  // kind_edited_by_user flag.
+
+  /**
+   * The page the facts came from. Stamped from the page the run actually
+   * fetched, never taken from the model, so an organization the model invented
+   * has no page behind it and is dropped before it is written.
+   */
+  source_url: z.string().nullable(),
+  /** What the extraction saw: page title, fetched-at, model confidence. */
+  evidence: z.unknown().nullable(),
+  discovery_run_id: uuid.nullable(),
+  why_relevant: z.string().nullable(),
 });
 
 export const communityInsert = communityRow
@@ -36,6 +53,10 @@ export const communityInsert = communityRow
     user_notes: true,
     genre_liked: true,
     focus: true,
+    source_url: true,
+    evidence: true,
+    discovery_run_id: true,
+    why_relevant: true,
   });
 
 export const communityUpdate = communityInsert.omit({ user_id: true }).partial();

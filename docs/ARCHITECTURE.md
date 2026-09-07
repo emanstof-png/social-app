@@ -5,7 +5,7 @@
 - **Database/auth:** Supabase (Postgres, Auth, Storage). Single user initially; schema is per-user from day one.
 - **LLM:** internal gateway (`lib/llm/gateway.ts`) speaking OpenAI-compatible chat + tool-calling. Providers: Anthropic, OpenRouter, Groq, Gemini (Google AI Studio), local (Ollama/LM Studio URL).
 - **Scheduled jobs:** Supabase cron → Edge Functions (or Vercel Cron). Jobs: scrape_calendars, discover_communities, weekly_plan, evaluation_prompts.
-- **Integrations:** Google Calendar API (OAuth, two-way), Web Push (VAPID), search API for discovery (Tavily or similar).
+- **Integrations:** Google Calendar API (OAuth, two-way), Web Push (VAPID), and a search provider chain for discovery — Exa (primary) → Tavily → Serper, all no-card free tiers, walked in that order with fall-through on rate limit or quota (spec 05).
 - **Hosting:** Vercel, auto-deploy from `main`.
 
 ## Data model (Supabase tables)
@@ -13,7 +13,9 @@
 - `assessment_answers` — question_id, question_text, answer, asked_at. Written per answer.
 - `assessments` — generated persona: summary, goals, traits, desired_activities (jsonb), assessment_types_used, generated_at, model_run_id.
 - `activities` — name, rationale, source (assessment | suggested | user), status (active | benched | cut).
-- `communities` — name, activity_id, type (community_event | community_general | one_off_source), website, calendar_url, calendar_kind (ics | html | api | manual), location, cost, discovered_at, status (todo | went_once | returning | cut | archived), user_notes, genre_liked (bool null), focus (bool — "one of my few current communities").
+- `communities` — name, activity_id, type (community_event | community_general | one_off_source), website, calendar_url, calendar_kind (ics | html | api | manual), location, cost, discovered_at, status (todo | went_once | returning | cut | archived), user_notes, genre_liked (bool null), focus (bool — "one of my few current communities"), and from spec 05: source_url, evidence (jsonb), discovery_run_id, why_relevant. Discovery writes the facts; the user owns status/focus/user_notes/genre_liked and discovery never writes those.
+- `discovery_runs` — activity_id, location, status (running | complete | failed | empty), rounds_done, searches_used, pages_read, communities_found, empty_rounds, last_error, started_at, finished_at. One row per discovery run; a run advances one round per request, so this is also what makes an interrupted run resumable (spec 05).
+- `search_log` — provider (exa | tavily | serper), query, discovery_run_id, result_count, status, error_kind, error_message, latency_ms. One row per search API call, successful or not, so a fall-through is visible rather than inferred. Separate from `run_log` because a search call has no tokens, no cost and no output schema, and does have a query and a result count (spec 05).
 - `events` — community_id, title, starts_at, ends_at, location, address, cost, event_type (community_event | community_general | one_off), source_url, rsvp_url, recurrence, registration_required, capacity, scraped_at, dedupe_hash (unique).
 - `selections` — event_id, selected_at, gcal_event_id, status (planned | attended | skipped).
 - `evaluations` — event_id, attended, liked, connections_quality (1-5), culture_notes, ease_of_meeting (1-5), answered_at.
@@ -33,6 +35,14 @@ Order of preference per community: ICS feed → public API (Meetup/Eventbrite) �
 
 ## Environment (.env.local and Vercel)
 NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY,
-ANTHROPIC_API_KEY (optional), OPENROUTER_API_KEY, GROQ_API_KEY (optional), GEMINI_API_KEY (optional), SEARCH_API_KEY,
+ANTHROPIC_API_KEY (optional), OPENROUTER_API_KEY, GROQ_API_KEY (optional), GEMINI_API_KEY (optional),
+EXA_API_KEY, TAVILY_API_KEY, SERPER_API_KEY,
 GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, NEXT_PUBLIC_VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY,
 ENCRYPTION_KEY (for provider_keys).
+
+The three search keys are read from the environment only and never from `provider_keys`
+(spec 05): CLAUDE.md's rule is secrets from environment variables only, and `provider_keys`
+is the deliberate exception that exists so *model* providers can be swapped without a
+redeploy. Discovery runs server-side, so a key missing in Vercel means the deployed app
+cannot search even though local works. Set all three for Production and Preview. CI needs
+none of them — every test in spec 05 runs against recorded fixtures with no network.

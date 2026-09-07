@@ -32,6 +32,8 @@ const rowSchemas: Record<string, z.ZodObject> = {
   model_settings: schemas.modelSettingRow,
   provider_keys: schemas.providerKeyRow,
   run_log: schemas.runLogRow,
+  discovery_runs: schemas.discoveryRunRow,
+  search_log: schemas.searchLogRow,
 };
 
 const enumSchemas: Record<string, z.ZodEnum<Record<string, string>>> = {
@@ -51,6 +53,8 @@ const enumSchemas: Record<string, z.ZodEnum<Record<string, string>>> = {
   record_status: schemas.recordStatus,
   run_status: schemas.runStatus,
   run_error_kind: schemas.runErrorKind,
+  search_provider: schemas.searchProvider,
+  discovery_run_status: schemas.discoveryRunStatus,
 };
 
 describe("schemas match the migrations", () => {
@@ -421,6 +425,133 @@ describe("activity_suggestion component schemas (spec 04 item 2)", () => {
     expect(() =>
       activitySuggestionInput.parse({ persona_summary: "Steady.", goals: [] }),
     ).toThrow();
+  });
+});
+
+describe("discovery and search schemas (spec 05 item 2)", () => {
+  const base = {
+    id: "11111111-1111-4111-8111-111111111111",
+    user_id: "22222222-2222-4222-8222-222222222222",
+    created_at: "2026-09-06T10:00:00+00:00",
+    updated_at: "2026-09-06T10:00:00+00:00",
+  };
+
+  it("carries discovery_extraction, which migration 0008 adds with alter type", () => {
+    // Guards the enumLabels reader as much as the schema: before it replayed
+    // `alter type ... add value`, a label added that way was invisible to the
+    // migration comparison above.
+    expect(enumLabels().llm_component).toContain("discovery_extraction");
+    expect(schemas.llmComponent.parse("discovery_extraction")).toBe(
+      "discovery_extraction",
+    );
+  });
+
+  it("accepts a zero-result search as an ok row, not an error", () => {
+    // A provider that answers "nothing" has succeeded. If this were modelled as
+    // an error the chain would fall through and burn Tavily's quota re-asking a
+    // question Exa already answered.
+    const parsed = schemas.searchLogRow.parse({
+      ...base,
+      provider: "exa",
+      query: "contra dance club Arlington Virginia",
+      discovery_run_id: null,
+      result_count: 0,
+      status: "ok",
+      error_kind: null,
+      error_message: null,
+      latency_ms: 1466,
+    });
+    expect(parsed.result_count).toBe(0);
+    expect(parsed.status).toBe("ok");
+  });
+
+  it("records a fall-through attempt with the reason it fell through", () => {
+    const parsed = schemas.searchLogRow.parse({
+      ...base,
+      provider: "exa",
+      query: "arlington rucking club",
+      discovery_run_id: "33333333-3333-4333-8333-333333333333",
+      result_count: null,
+      status: "error",
+      error_kind: "rate_limited",
+      error_message: "Exa returned 429",
+      latency_ms: 220,
+    });
+    expect(parsed.error_kind).toBe("rate_limited");
+  });
+
+  it("rejects a search provider that is not in the chain", () => {
+    expect(() =>
+      schemas.searchLogRow.parse({
+        ...base,
+        provider: "google",
+        query: "x",
+        discovery_run_id: null,
+        result_count: 1,
+        status: "ok",
+        error_kind: null,
+        error_message: null,
+        latency_ms: 1,
+      }),
+    ).toThrow();
+  });
+
+  it("keeps 'empty' distinct from 'complete' and 'failed'", () => {
+    const run = {
+      ...base,
+      activity_id: "44444444-4444-4444-8444-444444444444",
+      location: "Arlington",
+      status: "empty",
+      rounds_done: 0,
+      searches_used: 12,
+      pages_read: 4,
+      communities_found: 0,
+      empty_rounds: 2,
+      last_error: null,
+      started_at: "2026-09-06T10:00:00+00:00",
+      finished_at: "2026-09-06T10:04:00+00:00",
+    };
+    expect(schemas.discoveryRunRow.parse(run).status).toBe("empty");
+    expect(schemas.discoveryRunStatus.options).toEqual(
+      expect.arrayContaining(["running", "complete", "failed", "empty"]),
+    );
+    expect(() =>
+      schemas.discoveryRunRow.parse({ ...run, status: "done" }),
+    ).toThrow();
+  });
+
+  it("requires a location, since that is what the run actually searched", () => {
+    expect(() =>
+      schemas.discoveryRunInsert.parse({
+        user_id: base.user_id,
+        activity_id: null,
+        location: "",
+      }),
+    ).toThrow();
+  });
+
+  it("accepts a community row carrying the discovered-fact columns", () => {
+    const parsed = schemas.communityRow.parse({
+      ...base,
+      name: "Friday Night Dancers",
+      activity_id: "44444444-4444-4444-8444-444444444444",
+      type: "community_event",
+      website: "https://www.fridaynightdance.com/",
+      calendar_url: null,
+      calendar_kind: null,
+      location: "Glen Echo, MD",
+      cost: "$15",
+      discovered_at: "2026-09-06T10:00:00+00:00",
+      status: "todo",
+      user_notes: null,
+      genre_liked: null,
+      focus: false,
+      source_url: "https://www.fridaynightdance.com/about",
+      evidence: { page_title: "About FND's Dance", confidence: 0.9 },
+      discovery_run_id: "33333333-3333-4333-8333-333333333333",
+      why_relevant: "Weekly contra dance with a free beginner lesson.",
+    });
+    expect(parsed.source_url).toBe("https://www.fridaynightdance.com/about");
   });
 });
 

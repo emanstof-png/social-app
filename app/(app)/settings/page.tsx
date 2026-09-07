@@ -7,12 +7,14 @@ import {
 import { listModels } from "@/lib/llm/model-list";
 import type { ModelOption } from "@/lib/llm/catalog";
 import { hasConfiguredModels } from "@/lib/onboarding";
+import { searchProviderStatus } from "@/lib/search/credentials";
 import type { LlmProvider } from "@/lib/schemas/enums";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { ModelSettings } from "./model-settings";
 import { OnboardingStep } from "./onboarding-step";
 import { ProviderKeys, type KeyStatus } from "./provider-keys";
 import { RunLog, type RunLogEntry } from "./run-log";
+import { SearchProviders } from "./search-providers";
 
 export const metadata = { title: "Settings — gazelle" };
 
@@ -140,6 +142,18 @@ export default async function SettingsPage() {
           </p>
         </div>
         <ProviderKeys status={keyStatus} />
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <div>
+          <h2 className="text-lg font-medium">Search providers</h2>
+          <p className="mt-1 text-sm opacity-70">
+            Discovery searches through these in order, skipping any without a
+            key and falling through to the next on a rate limit or quota wall.
+            Set from environment variables only — there is nothing to paste here.
+          </p>
+        </div>
+        <SearchProviders status={searchProviderStatus()} />
       </section>
 
       <section className="flex flex-col gap-3">

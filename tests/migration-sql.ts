@@ -115,7 +115,15 @@ export function tableColumns(): Record<string, string[]> {
   return tables;
 }
 
-/** Enum type name -> labels, in declaration order, across all migrations. */
+/**
+ * Enum type name -> labels, in declaration order, across all migrations.
+ *
+ * Like tableColumns, this replays later alterations rather than trusting the
+ * `create type` alone. Spec 05 adds 'discovery_extraction' to llm_component
+ * with `alter type ... add value` in migration 0008, and a reader that only
+ * looked at `create type` would report the original seven labels and quietly
+ * pass a Zod enum that had drifted from Postgres.
+ */
 export function enumLabels(): Record<string, string[]> {
   const sql = allMigrationSql();
   const enums: Record<string, string[]> = {};
@@ -124,6 +132,17 @@ export function enumLabels(): Record<string, string[]> {
     /create type public\.(\w+) as enum\s*\(([\s\S]*?)\);/g,
   )) {
     enums[name] = [...body.matchAll(/'([^']*)'/g)].map(([, label]) => label);
+  }
+
+  // `add value` appends to the end of the enum unless BEFORE/AFTER is given.
+  // Nothing in this repo uses BEFORE/AFTER; if something does, handle it here
+  // rather than letting the position silently drift.
+  for (const [, name, label] of sql.matchAll(
+    /alter type public\.(\w+)\s+add value\s+(?:if not exists\s+)?'([^']*)'/g,
+  )) {
+    const labels = enums[name];
+    if (!labels) continue;
+    if (!labels.includes(label)) labels.push(label);
   }
 
   return enums;

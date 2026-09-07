@@ -1,0 +1,14 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Friday Night Dancers//Calendar//EN
+BEGIN:VEVENT
+UID:fnd-2026-09-18@fridaynightdance.com
+SUMMARY:Friday Night Contra Dance
+DTSTART:20260918T193000Z
+DTEND:20260918T223000Z
+DESCRIPTION:A weekly contra dance with live music\, a caller\, and a fre
+ e beginner lesson at 7:30pm before the dance proper starts. All levels w
+ elcome\, no partner or experience needed.
+LOCATION:American Legion Hall\, Arlington VA
+END:VEVENT
+END:VCALENDAR

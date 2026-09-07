@@ -1,0 +1,12 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Contra Dance Camps//Calendar//EN
+BEGIN:VEVENT
+UID:fall-camp-2026@example.org
+SUMMARY:Fall Dance Camp Weekend
+DTSTART;VALUE=DATE:20261010
+DTEND;VALUE=DATE:20261013
+LOCATION:Camp Letts, Edgewater MD
+DESCRIPTION:A weekend-long dance camp with contras\, squares and workshops.
+END:VEVENT
+END:VCALENDAR

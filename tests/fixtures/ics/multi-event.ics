@@ -1,0 +1,20 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//FSGW//Barn Dance Calendar//EN
+BEGIN:VEVENT
+UID:barn-dance-2026-09-13@fsgw.org
+SUMMARY:FSGW Barn Dance
+DTSTART:20260913T190000Z
+DTEND:20260913T223000Z
+LOCATION:Glen Echo Park\, Bumper Car Pavilion
+DESCRIPTION:Contras\, squares and circles with live music and a caller.
+URL:https://fsgw.wildapricot.org/barn-dance
+END:VEVENT
+BEGIN:VEVENT
+UID:english-country-2026-09-20@fsgw.org
+SUMMARY:FSGW English Country Dance
+DTSTART:20260920T193000Z
+DTEND:20260920T213000Z
+LOCATION:Glen Echo Park
+END:VEVENT
+END:VCALENDAR

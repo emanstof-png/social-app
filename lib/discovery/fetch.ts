@@ -153,8 +153,11 @@ export type PageFetcher = {
   isAllowed: (url: string) => Promise<{ allowed: boolean; note: string | null }>;
 };
 
-/** Reads a response body up to the cap, without buffering more than that. */
-async function readCapped(response: Response): Promise<string | null> {
+/**
+ * Reads a response body up to the cap, without buffering more than that.
+ * Exported: lib/scraping/ics-server.ts reuses this rather than a second copy.
+ */
+export async function readCapped(response: Response): Promise<string | null> {
   const declared = Number(response.headers.get("content-length") ?? "");
   if (Number.isFinite(declared) && declared > MAX_PAGE_BYTES) return null;
 

@@ -6,6 +6,7 @@ Implement the ONE spec file named in the session prompt exactly. If the spec is 
 
 ## Checkpoint discipline (no one-shotting)
 - Work through the spec's numbered Scope items ONE AT A TIME. After each item: summarize what you did in 3-5 lines, list files touched, and WAIT for the user to say "continue" before the next item.
+- At each checkpoint, name the CONVENTIONS.md sections the item followed, or state the deviation and why.
 - At the end of the spec, write `REVIEW.md` at repo root (overwrite): spec number, what was built, how to test it by hand (exact clicks/commands), what you were unsure about, and what the next spec needs. Then commit, tag, push, and tell the user: "Review gate: open your planning chat and paste REVIEW.md."
 - Do not start the next spec in the same session.
 

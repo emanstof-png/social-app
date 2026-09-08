@@ -1,5 +1,7 @@
 /**
- * The eight sections of the app (spec 01, scope item 4).
+ * The sections of the app (spec 01, scope item 4 -- originally eight;
+ * `/calendar` was folded into `/feed` as one merged view by the PRD §2.5
+ * fix, 2026-09-08, leaving seven).
  *
  * Deliberately NOT in nav.tsx. That file is a client component, and a plain
  * value exported across a "use client" boundary reaches a Server Component as a
@@ -13,7 +15,6 @@ export const NAV_ITEMS = [
   { href: "/activities", label: "Activities" },
   { href: "/communities", label: "Communities" },
   { href: "/feed", label: "Feed" },
-  { href: "/calendar", label: "Calendar" },
   { href: "/evaluations", label: "Evaluations" },
   { href: "/people", label: "People" },
   { href: "/settings", label: "Settings" },

@@ -8,9 +8,9 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { ActionResult } from "./view";
 
 /**
- * Select/unselect actions for the Feed and Calendar (spec 07 item 4). Both
- * routes share these -- /calendar has no actions.ts of its own, per the
- * spec's drafting decision.
+ * Select/unselect actions for the Feed, which since the PRD §2.5 fix
+ * (2026-09-08) is the only page reading these rows -- /calendar redirects
+ * here rather than rendering its own copy.
  *
  * Neither function calls a Google API or writes gcal_event_id -- spec 08 is
  * what makes selecting also sync (docs/specs/07-feed-and-calendar-views.md).
@@ -30,11 +30,8 @@ function describe(cause: unknown): string {
   return String(cause);
 }
 
-function revalidateBoth(): void {
-  // The two routes share the same underlying rows, so a selection made on one
-  // must be reflected on the other without a stale cache.
+function revalidateFeed(): void {
   revalidatePath("/feed");
-  revalidatePath("/calendar");
 }
 
 /**
@@ -64,7 +61,7 @@ export async function selectOccurrence(
 
     if (error) throw new Error(`Could not add that to your plan: ${error.message}`);
 
-    revalidateBoth();
+    revalidateFeed();
     return { ok: true, note: "Added to your plan." };
   } catch (cause) {
     return { ok: false, error: describe(cause) };
@@ -91,7 +88,7 @@ export async function unselectOccurrence(
 
     if (error) throw new Error(`Could not remove that from your plan: ${error.message}`);
 
-    revalidateBoth();
+    revalidateFeed();
     return { ok: true };
   } catch (cause) {
     return { ok: false, error: describe(cause) };

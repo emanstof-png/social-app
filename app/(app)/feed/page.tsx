@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { dayKeyIn } from "@/lib/feed/occurrences";
+import { dayKeyIn, monthGrid } from "@/lib/feed/occurrences";
 import { hasSelectedActivities } from "@/lib/onboarding";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { loadFeedData, readProfileForFeed } from "./data";
@@ -12,13 +12,24 @@ export const metadata = { title: "Feed — gazelle" };
 export const dynamic = "force-dynamic";
 
 /**
- * Feed (PRD §2.4), built in spec 07.
+ * Feed and calendar, merged into one view (PRD §2.5 fix, 2026-09-08): a
+ * month grid alongside the same flat, chronological list of every scraped
+ * event within the feed window, across every non-archived community -- not
+ * grouped by activity or gated behind the current focus set (see spec 07's
+ * drafting decisions). `/calendar` used to be a second page over this same
+ * read, added by spec 07 and then narrowed by its own addendum to a
+ * committed-only view specifically to avoid duplicating this page's full
+ * browse-and-pick list. Folding the grid back in here removes that
+ * duplication at the root instead, so the grid's day markers and the
+ * day-click scroll target are this page's own full `byDay` -- every
+ * scraped event, not just committed ones -- matching what the list right
+ * next to it actually shows. `/calendar` itself now just redirects here.
  *
- * A flat, chronological list of every scraped event within the feed window,
- * across every non-archived community -- not grouped by activity or gated
- * behind the current focus set (see the spec's drafting decisions).
+ * Month navigation is a `?month=YYYY-MM` search param, not client state,
+ * carried over from `/calendar`'s own precedent: every other page in this
+ * app is a server component driven by server actions and revalidatePath.
  */
-export default async function FeedPage() {
+export default async function FeedPage({ searchParams }: PageProps<"/feed">) {
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
@@ -44,21 +55,47 @@ export default async function FeedPage() {
     );
   }
 
+  const now = new Date();
+  const params = await searchParams;
+  const monthParam = Array.isArray(params.month) ? params.month[0] : params.month;
+  const { year, month } = parseMonthParam(monthParam, now, profile.timezone);
+
   let data;
   try {
-    const now = new Date();
     data = await loadFeedData(supabase, user.id, { timezone: profile.timezone, now });
   } catch (cause) {
     return <ErrorPanel cause={cause} />;
   }
 
+  // The grid never recomputes what counts as "has an event" -- it reuses the
+  // same day keys groupByDay already produced for the list right next to it.
+  const hasEventsOn = new Set(data.byDay.map((group) => group.day));
+  const grid = monthGrid(year, month, hasEventsOn);
+
   return (
     <FeedView
       byDay={data.byDay}
-      todayKey={dayKeyIn(new Date(), profile.timezone)}
+      todayKey={dayKeyIn(now, profile.timezone)}
       timezone={profile.timezone}
+      year={year}
+      month={month}
+      grid={grid}
     />
   );
+}
+
+/** Defaults to the current month in the profile's timezone. */
+function parseMonthParam(
+  raw: string | undefined,
+  now: Date,
+  timezone: string,
+): { year: number; month: number } {
+  if (raw && /^\d{4}-\d{2}$/.test(raw)) {
+    const [y, m] = raw.split("-").map(Number);
+    if (m >= 1 && m <= 12) return { year: y, month: m };
+  }
+  const [y, m] = dayKeyIn(now, timezone).split("-").map(Number);
+  return { year: y, month: m };
 }
 
 function ErrorPanel({ cause }: { cause: unknown }) {

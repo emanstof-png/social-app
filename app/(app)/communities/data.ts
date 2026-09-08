@@ -37,6 +37,11 @@ export type CommunityCard = {
   source_url: string | null;
   why_relevant: string | null;
   discovered_at: string;
+  /** Migration 0014 (spec 07 addendum: calendar-and-community-fields), both
+   * manually editable now -- spec 09's evaluation flow later writes these
+   * automatically from real attendance. */
+  times_visited: number;
+  rating: number | null;
 };
 
 /** An open or finished run, as the page shows it. */
@@ -73,7 +78,7 @@ export type CommunitiesData = {
 const COMMUNITY_COLUMNS =
   "id, name, activity_id, type, website, calendar_url, calendar_kind, " +
   "calendar_kind_checked_at, location, cost, status, user_notes, focus, " +
-  "source_url, why_relevant, discovered_at";
+  "source_url, why_relevant, discovered_at, times_visited, rating";
 
 const RUN_COLUMNS =
   "id, activity_id, location, status, rounds_done, searches_used, pages_read, " +
@@ -162,6 +167,8 @@ export async function readCommunities(
           source_url: true,
           why_relevant: true,
           discovered_at: true,
+          times_visited: true,
+          rating: true,
         })
         .parse(row) as CommunityCard,
   );

@@ -235,13 +235,25 @@ async function readPreviousQueriesFor(
   return [...new Set((data ?? []).map((row) => row.query as string))];
 }
 
+const timesVisitedSchema = z.number().int().nonnegative();
+const ratingSchema = z.number().int().min(1).max(5).nullable();
+
 /**
- * The three fields the user owns. Discovery never writes any of them, and this
+ * The fields the user owns. Discovery never writes any of them, and this
  * never writes a discovered fact -- the two sets are disjoint on purpose.
+ * times_visited and rating (migration 0014, spec 07 addendum:
+ * calendar-and-community-fields) are manually editable now; spec 09's
+ * evaluation flow will later write them from real attendance.
  */
 export async function updateCommunity(
   communityId: string,
-  patch: { status?: string; focus?: boolean; user_notes?: string },
+  patch: {
+    status?: string;
+    focus?: boolean;
+    user_notes?: string;
+    times_visited?: number;
+    rating?: number | null;
+  },
 ): Promise<ActionResult> {
   try {
     const { supabase, userId } = await currentUser();
@@ -254,6 +266,12 @@ export async function updateCommunity(
     if (patch.focus !== undefined) changes.focus = Boolean(patch.focus);
     if (patch.user_notes !== undefined) {
       changes.user_notes = patch.user_notes.trim() || null;
+    }
+    if (patch.times_visited !== undefined) {
+      changes.times_visited = timesVisitedSchema.parse(patch.times_visited);
+    }
+    if (patch.rating !== undefined) {
+      changes.rating = ratingSchema.parse(patch.rating);
     }
 
     if (Object.keys(changes).length === 0) return { ok: true };

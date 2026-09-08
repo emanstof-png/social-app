@@ -193,11 +193,14 @@ function Card({ community }: { community: CommunityCard }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [notes, setNotes] = useState(community.user_notes ?? "");
+  const [timesVisited, setTimesVisited] = useState(String(community.times_visited));
 
   function save(patch: {
     status?: string;
     focus?: boolean;
     user_notes?: string;
+    times_visited?: number;
+    rating?: number | null;
   }) {
     setError(null);
     startTransition(async () => {
@@ -281,6 +284,46 @@ function Card({ community }: { community: CommunityCard }) {
             {Object.entries(COMMUNITY_STATUS_LABELS).map(([value, label]) => (
               <option key={value} value={value}>
                 {label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="flex items-center gap-1.5 text-xs">
+          <span className="opacity-70">Times visited</span>
+          <input
+            type="number"
+            min={0}
+            step={1}
+            value={timesVisited}
+            disabled={pending}
+            onChange={(event) => setTimesVisited(event.target.value)}
+            onBlur={() => {
+              const parsed = Number(timesVisited);
+              if (!Number.isInteger(parsed) || parsed < 0) {
+                setTimesVisited(String(community.times_visited));
+                return;
+              }
+              if (parsed !== community.times_visited) save({ times_visited: parsed });
+            }}
+            className="w-16 rounded border border-black/15 bg-transparent px-2 py-1 text-xs dark:border-white/20"
+          />
+        </label>
+
+        <label className="flex items-center gap-1.5 text-xs">
+          <span className="opacity-70">Rating</span>
+          <select
+            value={community.rating ?? ""}
+            disabled={pending}
+            onChange={(event) =>
+              save({ rating: event.target.value === "" ? null : Number(event.target.value) })
+            }
+            className="rounded border border-black/15 bg-transparent px-2 py-1 text-xs dark:border-white/20"
+          >
+            <option value="">Not rated</option>
+            {[1, 2, 3, 4, 5].map((value) => (
+              <option key={value} value={value}>
+                {value}
               </option>
             ))}
           </select>

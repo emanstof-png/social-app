@@ -3,6 +3,8 @@ import { z } from "zod";
 import { timestampedRowBase, timestamptz, uuid } from "./common";
 import { calendarKind, communityStatus, communityType } from "./enums";
 
+const oneToFive = z.number().int().min(1).max(5);
+
 export const communityRow = timestampedRowBase.extend({
   name: z.string().min(1),
   activity_id: uuid.nullable(),
@@ -40,6 +42,12 @@ export const communityRow = timestampedRowBase.extend({
   evidence: z.unknown().nullable(),
   discovery_run_id: uuid.nullable(),
   why_relevant: z.string().nullable(),
+
+  // Migration 0014 (spec 07 addendum: calendar-and-community-fields). Both
+  // user-owned, like status/focus/user_notes above -- discovery never writes
+  // either.
+  times_visited: z.number().int().nonnegative(),
+  rating: oneToFive.nullable(),
 });
 
 export const communityInsert = communityRow
@@ -61,6 +69,8 @@ export const communityInsert = communityRow
     evidence: true,
     discovery_run_id: true,
     why_relevant: true,
+    times_visited: true,
+    rating: true,
   });
 
 export const communityUpdate = communityInsert.omit({ user_id: true }).partial();

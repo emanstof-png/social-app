@@ -714,8 +714,65 @@ describe("discovery and search schemas (spec 05 item 2)", () => {
       evidence: { page_title: "About FND's Dance", confidence: 0.9 },
       discovery_run_id: "33333333-3333-4333-8333-333333333333",
       why_relevant: "Weekly contra dance with a free beginner lesson.",
+      times_visited: 2,
+      rating: 4,
     });
     expect(parsed.source_url).toBe("https://www.fridaynightdance.com/about");
+  });
+
+  it("rejects a community rating outside 1-5 (migration 0014)", () => {
+    expect(() =>
+      schemas.communityRow.parse({
+        ...base,
+        name: "Friday Night Dancers",
+        activity_id: null,
+        type: "community_event",
+        website: null,
+        calendar_url: null,
+        calendar_kind: null,
+        calendar_kind_checked_at: null,
+        location: null,
+        cost: null,
+        discovered_at: "2026-09-06T10:00:00+00:00",
+        status: "todo",
+        user_notes: null,
+        genre_liked: null,
+        focus: false,
+        source_url: null,
+        evidence: null,
+        discovery_run_id: null,
+        why_relevant: null,
+        times_visited: 0,
+        rating: 6,
+      }),
+    ).toThrow();
+  });
+
+  it("accepts a null community rating -- never visited or rated yet", () => {
+    const parsed = schemas.communityRow.parse({
+      ...base,
+      name: "Friday Night Dancers",
+      activity_id: null,
+      type: "community_event",
+      website: null,
+      calendar_url: null,
+      calendar_kind: null,
+      calendar_kind_checked_at: null,
+      location: null,
+      cost: null,
+      discovered_at: "2026-09-06T10:00:00+00:00",
+      status: "todo",
+      user_notes: null,
+      genre_liked: null,
+      focus: false,
+      source_url: null,
+      evidence: null,
+      discovery_run_id: null,
+      why_relevant: null,
+      times_visited: 0,
+      rating: null,
+    });
+    expect(parsed.rating).toBeNull();
   });
 });
 

@@ -109,15 +109,43 @@ the spec's own wording for `hasEventsOn`), `#day-YYYY-MM-DD` anchors
 linking grid days to their list section. Cards here are deliberately more
 minimal than the Feed's (PRD §2.5): title, time, and the badge only.
 
-**Item 7 — event-selection e2e test.** `e2e/feed.spec.ts`: seeds one
-fixture `communities` row and one fixture `events` row directly with the
-admin client against `E2E_USER_ID` (no live discovery/scraping, no model
-call), `starts_at` 7 days out, title prefixed `"[e2e] "`. Does not call the
-shared `resetUser` (its cascade orphaned real data once, per spec 06's
-REVIEW.md); a narrow `clearFixture` deletes only this fixture's own rows by
-fixed ids, idempotently, before and after. Signs in via the existing
-magic-link `/auth/callback` pattern, clicks Select, reads the `selections`
-row back with the admin client, clicks Added, confirms the row is gone.
+**Item 7 — event-selection e2e tests.** `e2e/feed.spec.ts`: seeds fixture
+`communities` and `events` rows directly with the admin client against
+`E2E_USER_ID` (no live discovery/scraping, no model call), `starts_at` 7
+days out, titles prefixed `"[e2e] "`. Does not call the shared `resetUser`
+(its cascade orphaned real data once, per spec 06's REVIEW.md); a narrow
+`clearFixture` deletes only this fixture's own rows by fixed ids,
+idempotently, before and after. Signs in via the existing magic-link
+`/auth/callback` pattern. Five tests, the first written and passing in this
+session's original pass, the other four added afterward against commit
+e1691e6 to close four blocking gaps a prior reviewer pass found in this same
+file (duplicate-select no-op, independent-occurrence rows, feed/calendar
+sync, archived/cut filtering — see `REVIEW-FLAGS.md`):
+
+1. **Seed/select/unselect.** Clicks Select, reads the `selections` row back
+   with the admin client, clicks Added, confirms the row is gone.
+2. **Duplicate-select no-op.** Two tabs on the same session, both loaded
+   before either selects; the first tab selects, then the second (still
+   showing a stale "Select" button) selects the identical occurrence —
+   asserts no error surfaces and exactly one `selections` row exists, not
+   two, proving `selectOccurrence`'s `ignoreDuplicates` upsert actually
+   holds under a real double submission, not just a same-tab double-click
+   the UI's own pending state would already prevent.
+3. **Independent occurrence rows.** A `FREQ=WEEKLY;COUNT=4` fixture renders
+   4 cards; selecting the first and second occurrences produces two
+   `selections` rows with the two expected `occurrence_at` values (read back
+   and compared as `Date`s, not strings); unselecting the first leaves the
+   second's row untouched.
+4. **Feed/calendar sync without a manual refresh.** Navigates to `/calendar`
+   first via a client-side link (so its route already has something in the
+   router cache a missing `revalidatePath` would leave stale), selects on
+   `/feed`, then client-navigates to `/calendar` and confirms the card shows
+   Added there without a reload; unselects on `/calendar` and confirms
+   `/feed` reflects it back, same way.
+5. **Archived-excluded, cut-included.** Confirms `loadFeedData`'s live join
+   excludes an archived community's events and still shows a cut
+   community's, matching `partitionByArchived`'s existing precedent — not
+   just the pure `lib/feed/` functions in isolation.
 
 **A real bug, found live by this test, before it ever passed — not by any
 unit test.** Clicking Select genuinely wrote a `selections` row (confirmed
@@ -174,9 +202,9 @@ actions.ts`, `app/(app)/feed/page.tsx`, `app/(app)/feed/feed-view.tsx`,
    becomes Added; the same event's state matches on the other page without
    a manual refresh. Click Added to remove it.
 5. **The real thing, automated.** `npm run test:e2e` — builds, starts a
-   production server, runs `login` + `assessment` + `feed` (5 tests). All
-   five passed live against `wqawpwbgrsjusbdopgbi` and `E2E_USER_ID` during
-   this session.
+   production server, runs `login` + `assessment` + `feed` (9 tests: 2 + 2 +
+   5). All nine passed live against `wqawpwbgrsjusbdopgbi` and
+   `E2E_USER_ID` during this session.
 
 ---
 
@@ -191,7 +219,7 @@ halves were actually done, not just one.
 - **A real production server (`next start`), not the deployed Vercel URL.**
   Two separate live checks, both against `wqawpwbgrsjusbdopgbi`:
   - The full `npm run test:e2e` suite (`login` + `assessment` + `feed`,
-    5/5) ran against a real `next build` + `next start`, with `feed.spec.ts`
+    9/9) ran against a real `next build` + `next start`, with `feed.spec.ts`
     driving a real Select → read the real row back with the admin client →
     click Added → confirm the row is gone, against the real database, not a
     mock. This is also what found and fixed the `occurrenceKey` bug above:

@@ -106,3 +106,14 @@ ids>`), then 0001–0011 were repaired in under their real names
 data touched. `npm run migrate:status` now shows exactly 0001–0011 applied and nothing
 pending or stray. From here on, a migration file in a spec is applied by the builder via
 `npm run migrate`, not by hand through the dashboard.
+
+## Build loop (spec 13)
+
+**Permissions.** `.claude/settings.json` (committed) is the explicit allowlist an unattended
+`claude -p` session runs under, with `--permission-mode acceptEdits`, never
+`--dangerously-skip-permissions`: `npm run *`, `npx supabase *`, `npx tsx *`, `npx vitest *`,
+`npx playwright *`, `git *` except `git push --force*` and `git reset --hard*` (both
+explicitly denied — deny always wins over a broader allow), plus `Edit`/`Write` for file
+edits within the repo. Anything the allowlist doesn't cover is not retried: a non-interactive
+session has no one to answer a permission prompt, so an uncovered command simply fails, which
+is exactly the High-tier stop `CLAUDE.md`'s tier rule calls for.

@@ -14,7 +14,9 @@
     "prepare": "husky",
     "discover": "tsx --env-file=.env.local scripts/discover.ts",
     "setup:e2e-user": "tsx --env-file=.env.local scripts/setup-e2e-user.ts",
-    "verify:e2e-isolation": "tsx --env-file=.env.local scripts/verify-e2e-isolation.ts"
+    "verify:e2e-isolation": "tsx --env-file=.env.local scripts/verify-e2e-isolation.ts",
+    "migrate": "bash -c 'set -a && source .env.local && set +a && supabase db push --linked'",
+    "migrate:status": "bash -c 'set -a && source .env.local && set +a && supabase migration list --linked'"
   },
   "lint-staged": {
     "*.{ts,tsx,mts,mjs}": "eslint --fix --no-warn-ignored"
@@ -37,6 +39,7 @@
     "eslint-config-next": "16.3.4",
     "husky": "^9.1.7",
     "lint-staged": "^17.5.0",
+    "supabase": "^2.117.0",
     "tailwindcss": "^4",
     "tsx": "^4.23.13",
     "typescript": "^5",

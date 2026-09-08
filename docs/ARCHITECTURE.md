@@ -80,3 +80,29 @@ is the deliberate exception that exists so *model* providers can be swapped with
 redeploy. Discovery runs server-side, so a key missing in Vercel means the deployed app
 cannot search even though local works. Set all three for Production and Preview. CI needs
 none of them — every test in spec 05 runs against recorded fixtures with no network.
+
+**Loop-only variables (spec 13).** `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD` and
+`GH_TOKEN` live in `.env.local` on the machine running the build loop and nowhere else —
+never Vercel, never GitHub repository secrets. `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`
+and `NEXT_PUBLIC_VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY` are spec 08 and spec 09
+prerequisites pulled forward into spec 13's own prerequisites table so those specs do not
+halt on them; they go in `.env.local` and Vercel (Production and Preview) once specs 08/09
+actually use them.
+
+**Migration runner (spec 13 item 1).** The Supabase CLI (`supabase`, a dev dependency) is
+linked to project `wqawpwbgrsjusbdopgbi` via `SUPABASE_ACCESS_TOKEN` and
+`SUPABASE_DB_PASSWORD`. `npm run migrate` runs `supabase db push --linked`; `npm run
+migrate:status` runs `supabase migration list --linked`. Both wrap the call in
+`bash -c 'set -a && source .env.local && set +a && supabase …'` because the CLI is a Go
+binary, not a Node script — it does not understand `tsx --env-file`, and does not load
+`.env.local` on its own, so the vars have to be exported into its environment by hand.
+Migrations 0001–0011 were applied by hand through the SQL Editor before this spec; the
+dashboard's own SQL Editor had already tracked ten of them (0001–0010) in
+`supabase_migrations.schema_migrations` under its own timestamp-based version ids rather
+than the repo's filenames, and 0011 wasn't tracked at all. Reconciled once, by hand: those
+ten stray rows were reverted (`supabase migration repair --status reverted <timestamp
+ids>`), then 0001–0011 were repaired in under their real names
+(`supabase migration repair --status applied 0001 … 0011`) — bookkeeping only, no schema or
+data touched. `npm run migrate:status` now shows exactly 0001–0011 applied and nothing
+pending or stray. From here on, a migration file in a spec is applied by the builder via
+`npm run migrate`, not by hand through the dashboard.

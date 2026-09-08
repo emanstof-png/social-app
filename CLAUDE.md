@@ -4,8 +4,11 @@
 Implement the ONE spec file named in the session prompt exactly. If the spec is ambiguous or you want to deviate, STOP and ask. Never silently improvise. Never add features not in docs/PRD.md.
 - Before implementing, read `docs/CONVENTIONS.md` and every addendum the spec names in its opening paragraph. If a named addendum is missing from the repo, STOP and ask.
 
-## Checkpoint discipline (no one-shotting)
-- Work through the spec's numbered Scope items ONE AT A TIME. After each item: summarize what you did in 3-5 lines, list files touched, and WAIT for the user to say "continue" before the next item.
+## Checkpoint discipline (tiered, one spec per session)
+- A session builds ONE whole spec, then stops. It does not wait for "continue" between scope items.
+- **Low tier** (pure modules, parsers, prompts, tests, docs, UI wired to an already-decided action): build straight through.
+- **Medium tier** (server actions and merge logic that write app rows, new migration files): build, red-before-green tests, `--dry-run` where one exists, apply the migration with `npm run migrate`, continue. Flag in REVIEW.md.
+- **High tier** (data migrations across accounts, archiving or repointing real rows, anything touching the e2e/real account split, secrets, OAuth consent, a dependency beyond the stack, a deviation from a convention, or anything you would otherwise stop and ask about): write `NEEDS_HUMAN.md` and stop the session.
 - At each checkpoint, name the CONVENTIONS.md sections the item followed, or state the deviation and why.
 - At the end of the spec, write `REVIEW.md` at repo root (overwrite): spec number, what was built, how to test it by hand (exact clicks/commands), what you were unsure about, and what the next spec needs. Then commit, tag, push, and tell the user: "Review gate: open your planning chat and paste REVIEW.md."
 - Do not start the next spec in the same session.

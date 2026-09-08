@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 
 import { MAX_ROUNDS } from "@/lib/discovery/budget";
 import { advanceDiscovery, scrapeCommunityEvents, updateCommunity } from "./actions";
@@ -189,23 +189,48 @@ function ActivitySection({ group }: { group: ActivityGroup }) {
   );
 }
 
+/** Every field `save()` can write, keyed the same as its patch's own key --
+ * used only to say which field to flash "Saved" next to. */
+type SavableField = "status" | "focus" | "user_notes" | "times_visited" | "rating";
+
 function Card({ community }: { community: CommunityCard }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [notes, setNotes] = useState(community.user_notes ?? "");
   const [timesVisited, setTimesVisited] = useState(String(community.times_visited));
+  const [savedField, setSavedField] = useState<SavableField | null>(null);
+  const savedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  useEffect(() => {
+    return () => {
+      if (savedTimeoutRef.current) clearTimeout(savedTimeoutRef.current);
+    };
+  }, []);
+
+  /**
+   * Every field here autosaves on its own trigger (onBlur for the free-text
+   * ones, onChange for the rest) -- there is no separate Save button. The
+   * only feedback on success used to be silence, indistinguishable from a
+   * write that never fired; `savedField` flashes a "Saved" note next to
+   * whichever field just wrote successfully, cleared after two seconds.
+   */
   function save(patch: {
     status?: string;
     focus?: boolean;
     user_notes?: string;
     times_visited?: number;
     rating?: number | null;
-  }) {
+  }, field: SavableField) {
     setError(null);
     startTransition(async () => {
       const result = await updateCommunity(community.id, patch);
-      if (!result.ok) setError(result.error);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      if (savedTimeoutRef.current) clearTimeout(savedTimeoutRef.current);
+      setSavedField(field);
+      savedTimeoutRef.current = setTimeout(() => setSavedField(null), 2000);
     });
   }
 
@@ -278,7 +303,7 @@ function Card({ community }: { community: CommunityCard }) {
           <select
             value={community.status}
             disabled={pending}
-            onChange={(event) => save({ status: event.target.value })}
+            onChange={(event) => save({ status: event.target.value }, "status")}
             className="rounded border border-black/15 bg-transparent px-2 py-1 text-xs dark:border-white/20"
           >
             {Object.entries(COMMUNITY_STATUS_LABELS).map(([value, label]) => (
@@ -287,6 +312,7 @@ function Card({ community }: { community: CommunityCard }) {
               </option>
             ))}
           </select>
+          <SavedBadge show={savedField === "status"} />
         </label>
 
         <label className="flex items-center gap-1.5 text-xs">
@@ -304,10 +330,11 @@ function Card({ community }: { community: CommunityCard }) {
                 setTimesVisited(String(community.times_visited));
                 return;
               }
-              if (parsed !== community.times_visited) save({ times_visited: parsed });
+              if (parsed !== community.times_visited) save({ times_visited: parsed }, "times_visited");
             }}
             className="w-16 rounded border border-black/15 bg-transparent px-2 py-1 text-xs dark:border-white/20"
           />
+          <SavedBadge show={savedField === "times_visited"} />
         </label>
 
         <label className="flex items-center gap-1.5 text-xs">
@@ -316,7 +343,10 @@ function Card({ community }: { community: CommunityCard }) {
             value={community.rating ?? ""}
             disabled={pending}
             onChange={(event) =>
-              save({ rating: event.target.value === "" ? null : Number(event.target.value) })
+              save(
+                { rating: event.target.value === "" ? null : Number(event.target.value) },
+                "rating",
+              )
             }
             className="rounded border border-black/15 bg-transparent px-2 py-1 text-xs dark:border-white/20"
           >
@@ -327,6 +357,7 @@ function Card({ community }: { community: CommunityCard }) {
               </option>
             ))}
           </select>
+          <SavedBadge show={savedField === "rating"} />
         </label>
 
         <label className="flex items-center gap-1.5 text-xs">
@@ -334,21 +365,25 @@ function Card({ community }: { community: CommunityCard }) {
             type="checkbox"
             checked={community.focus}
             disabled={pending}
-            onChange={(event) => save({ focus: event.target.checked })}
+            onChange={(event) => save({ focus: event.target.checked }, "focus")}
           />
           <span className="opacity-70">One of my few</span>
+          <SavedBadge show={savedField === "focus"} />
         </label>
       </div>
 
       <label className="flex flex-col gap-1 text-xs">
-        <span className="opacity-70">Your notes</span>
+        <span className="flex items-center gap-1.5 opacity-70">
+          Your notes
+          <SavedBadge show={savedField === "user_notes"} />
+        </span>
         <textarea
           value={notes}
           disabled={pending}
           rows={2}
           onChange={(event) => setNotes(event.target.value)}
           onBlur={() => {
-            if (notes !== (community.user_notes ?? "")) save({ user_notes: notes });
+            if (notes !== (community.user_notes ?? "")) save({ user_notes: notes }, "user_notes");
           }}
           className="rounded border border-black/15 bg-transparent px-2 py-1 text-sm dark:border-white/20"
         />
@@ -360,6 +395,17 @@ function Card({ community }: { community: CommunityCard }) {
         </p>
       ) : null}
     </article>
+  );
+}
+
+/** A field autosaved with no separate Save button; this is the only signal a
+ * write actually took, next to whichever field just wrote. */
+function SavedBadge({ show }: { show: boolean }) {
+  if (!show) return null;
+  return (
+    <span role="status" className="text-[10px] text-green-700 dark:text-green-400">
+      ✓ Saved
+    </span>
   );
 }
 

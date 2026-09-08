@@ -177,4 +177,23 @@ test.describe("communities", () => {
     await expect(reloadedCard.getByLabel("Times visited")).toHaveValue("3");
     await expect(reloadedCard.getByLabel("Rating")).toHaveValue("4");
   });
+
+  test("editing times-visited or rating shows a Saved confirmation that clears itself (fix, 2026-09-08)", async ({
+    page,
+  }) => {
+    await expect(page.getByText(FIXTURE_COMMUNITY_NAME)).toBeVisible({ timeout: 20_000 });
+    const card = page.locator("article", { hasText: FIXTURE_COMMUNITY_NAME });
+    await expect(card.getByRole("status")).toHaveCount(0);
+
+    const timesVisitedInput = card.getByLabel("Times visited");
+    await timesVisitedInput.fill("2");
+    await timesVisitedInput.blur();
+    await expect(card.getByRole("status")).toHaveText("✓ Saved", { timeout: 10_000 });
+    // The badge is a flash, not a permanent state -- it clears itself.
+    await expect(card.getByRole("status")).toHaveCount(0, { timeout: 5_000 });
+
+    const ratingSelect = card.getByLabel("Rating");
+    await ratingSelect.selectOption("5");
+    await expect(card.getByRole("status")).toHaveText("✓ Saved", { timeout: 10_000 });
+  });
 });

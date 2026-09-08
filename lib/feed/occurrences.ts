@@ -273,27 +273,30 @@ export function expandOccurrences(
 // -- Grouping and the calendar grid ----------------------------------------------
 
 /**
- * Buckets any array carrying a startsAt field by calendar day in the given
- * IANA timezone, day-ordered. Same technique as
- * app/(app)/communities/actions.ts's todayIn: en-CA formats as YYYY-MM-DD
+ * "YYYY-MM-DD" for `date` in the given IANA timezone. Same technique as
+ * app/(app)/communities/actions.ts's todayIn: en-CA formats that way
  * directly.
  */
-export function groupByDay<T extends { startsAt: string }>(
-  items: T[],
-  timezone: string,
-): { day: string; items: T[] }[] {
-  const formatter = new Intl.DateTimeFormat("en-CA", {
+export function dayKeyIn(date: Date, timezone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
     timeZone: timezone,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  });
+  }).format(date);
+}
 
+/** Buckets any array carrying a startsAt field by calendar day in the given
+ * IANA timezone, day-ordered. */
+export function groupByDay<T extends { startsAt: string }>(
+  items: T[],
+  timezone: string,
+): { day: string; items: T[] }[] {
   const groups: { day: string; items: T[] }[] = [];
   const byDay = new Map<string, T[]>();
 
   for (const item of items) {
-    const day = formatter.format(new Date(item.startsAt));
+    const day = dayKeyIn(new Date(item.startsAt), timezone);
     let list = byDay.get(day);
     if (!list) {
       list = [];

@@ -27,3 +27,23 @@ export const EVENT_TYPE_LABELS = {
   community_general: "Standing group event",
   one_off: "One-off",
 } as const;
+
+function parseDayKey(day: string): Date {
+  const [y, m, d] = day.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d));
+}
+
+/** "Today", "Tomorrow", or a short formatted date -- `day` and `todayKey` are
+ * both "YYYY-MM-DD" from lib/feed/occurrences's dayKeyIn/groupByDay. */
+export function dayLabel(day: string, todayKey: string): string {
+  if (day === todayKey) return "Today";
+  if (parseDayKey(day).getTime() - parseDayKey(todayKey).getTime() === 86_400_000) {
+    return "Tomorrow";
+  }
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(parseDayKey(day));
+}

@@ -17,6 +17,30 @@ import { eventRow, selectionRow, type EventType, type SelectionRow } from "@/lib
 
 export type Db = SupabaseClient;
 
+/**
+ * Just the two profile fields this page needs -- timezone for
+ * expand/grouping, onboarding_state for the gate. No search happens here, so
+ * unlike communities/data.ts's readProfile this needs neither cap nor
+ * home_location.
+ */
+export async function readProfileForFeed(
+  supabase: Db,
+  userId: string,
+): Promise<{ timezone: string; onboardingState: string }> {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("timezone, onboarding_state")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) throw new Error(`Could not read your profile: ${error.message}`);
+
+  return {
+    timezone: (data?.timezone as string) || "America/New_York",
+    onboardingState: (data?.onboarding_state as string) ?? "new",
+  };
+}
+
 export type FeedCard = {
   eventId: string;
   occurrenceAt: string;

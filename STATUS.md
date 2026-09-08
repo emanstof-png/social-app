@@ -20,6 +20,7 @@
 - [LOOP] spec 09 evaluation-and-push (draft spec first) — TODO: needs NEXT_PUBLIC_VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY (web push). Scheduled parts follow `docs/specs/06-scheduled-jobs-addendum.md`.
 - [LOOP] spec 10 crm (draft spec first)
 - [LOOP] spec 11 weekly-planning-and-invites (draft spec first) — scheduled parts follow `docs/specs/06-scheduled-jobs-addendum.md`.
+- Read `docs/specs/dojo-and-practice-layer-note.md` before drafting spec 09 or spec 11 — a sharper problem statement and an unscoped "dojo" practice layer that may change what either spec is for.
 
 ## Next
 - **Action needed from Eric:** add `E2E_USER_ID` as a GitHub repository secret (value in the spec-06 item-0 commit message, or re-run `npm run setup:e2e-user`) — CI's Playwright job skips cleanly without it, same as the other four secrets, but the login/assessment tests need it to run at all.

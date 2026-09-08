@@ -17,7 +17,7 @@
 - `discovery_runs` — activity_id, location, status (running | complete | failed | empty), rounds_done, searches_used, pages_read, communities_found, empty_rounds, last_error, started_at, finished_at. One row per discovery run; a run advances one round per request, so this is also what makes an interrupted run resumable (spec 05).
 - `search_log` — provider (exa | tavily | serper), query, discovery_run_id, result_count, status, error_kind, error_message, latency_ms. One row per search API call, successful or not, so a fall-through is visible rather than inferred. Separate from `run_log` because a search call has no tokens, no cost and no output schema, and does have a query and a result count (spec 05).
 - `events` — community_id, title, starts_at, ends_at, location, address, cost, event_type (community_event | community_general | one_off), source_url, rsvp_url, recurrence, registration_required, capacity, scraped_at, dedupe_hash (unique).
-- `selections` — event_id, selected_at, gcal_event_id, status (planned | attended | skipped).
+- `selections` — event_id, occurrence_at (spec 07: the specific dated instance selected, required on every row including a non-recurring event's, where it equals that event's own starts_at), selected_at, gcal_event_id, status (planned | attended | skipped). Unique on (user_id, event_id, occurrence_at), widened from (user_id, event_id) in migration 0012 so one recurring event can have more than one independently-selected occurrence.
 - `evaluations` — event_id, attended, liked, connections_quality (1-5), culture_notes, ease_of_meeting (1-5), answered_at.
 - `preference_log` — entity_type (genre | community | venue), entity_id/name, liked (bool), note, logged_at.
 - `contacts` — name, phone, email, met_at_event_id, met_at_community_id, met_on, notes, phone_contact_id (nullable).
@@ -66,6 +66,44 @@ One scrape, one community. Deterministic-first, same discipline as discovery: `e
 
 ## Scraping strategy (spec 06)
 Order of preference per community: ICS feed → public API (Meetup/Eventbrite) → HTML page passed to `event_extraction` (LLM → schema). Built: ICS and HTML. Not built: the API tier — Meetup and Eventbrite adapters need developer keys neither `.env.local` nor Vercel has, so an `api`-kind community is reported as unsupported rather than scraped. Dedupe on hash(community_id, title, starts_at). Respect robots.txt. Log failures to `run_log`; an unreachable calendar is surfaced in the UI rather than silently retried.
+
+## Feed and calendar views (spec 07)
+
+**Occurrences are expanded at read time, never written back as new `events`
+rows.** `lib/feed/occurrences.ts` is pure (no Supabase client, no fetch, no
+`process.env`): `parseRrule` detects a machine-parseable RRULE by grammar
+alone (`FREQ=DAILY|WEEKLY|MONTHLY`, `INTERVAL`, `BYDAY` for `WEEKLY` only,
+`COUNT`, `UNTIL`) and returns `null` for anything outside that bounded
+subset — prose, an unrecognized `FREQ`, an unsupported parameter, or ordinal
+`BYDAY` (`1FR`) on a `MONTHLY` rule. One function serves both ICS's raw
+`RRULE` values and `event_extraction`'s free-text `recurrence` with no
+ics-vs-html flag: prose never matches the grammar, so it always falls
+through to a single occurrence at the event's own `starts_at`, shown
+verbatim and never guessed at (CLAUDE.md: never invent). `expandOccurrences`
+stops at whichever of the window's end, `COUNT`, `UNTIL`, or
+`MAX_OCCURRENCES_PER_EVENT` (`lib/feed/budget.ts`, 26 — a courtesy cap
+independent of the 90-day `FEED_WINDOW_DAYS` window) comes first.
+
+**`selections.occurrence_at`** (migration 0012) is required on every row,
+including a non-recurring event's, and widens the unique key to
+`(user_id, event_id, occurrence_at)` — see the Data model entry above.
+
+**Selecting writes only a `selections` row.** `app/(app)/feed/actions.ts`'s
+`selectOccurrence`/`unselectOccurrence` never call a Google API and never
+write `gcal_event_id`; that is spec 08's job. The UI copy says "Added to
+your plan," never "Added to your calendar," so it never claims a capability
+this spec doesn't build.
+
+**The Feed reads by `community_id` directly**, not through the
+focus-set/activity join `app/(app)/communities/data.ts` uses — a scraped
+event stays visible until its own community is `archived` (a `cut`
+community's events still show, matching `partitionByArchived`'s existing
+precedent), regardless of whether the activity is still in the current focus
+set. `/calendar` has no `data.ts` or `actions.ts` of its own: it imports
+`loadFeedData` and the two select/unselect actions from `../feed/` directly,
+since it is a second presentation over the same read and actions, not a
+second read path. Month navigation is a `?month=YYYY-MM` search param, not
+client state.
 
 ## Environment (.env.local and Vercel)
 NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY,

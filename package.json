@@ -17,7 +17,9 @@
     "verify:e2e-isolation": "tsx --env-file=.env.local scripts/verify-e2e-isolation.ts",
     "needs-human": "tsx --env-file=.env.local scripts/needs-human.ts",
     "migrate": "bash -c 'set -a && source .env.local && set +a && supabase db push --linked'",
-    "migrate:status": "bash -c 'set -a && source .env.local && set +a && supabase migration list --linked'"
+    "migrate:status": "bash -c 'set -a && source .env.local && set +a && supabase migration list --linked'",
+    "loop:once": "bash scripts/run-spec.sh",
+    "loop": "bash -c 'while bash scripts/run-spec.sh; do sleep 30; done'"
   },
   "lint-staged": {
     "*.{ts,tsx,mts,mjs}": "eslint --fix --no-warn-ignored"

@@ -23,19 +23,13 @@ import { expect, test } from "@playwright/test";
  * communities/events/selections rows by their own fixed ids, idempotently,
  * both before and after.
  *
- * Beyond the base select/unselect flow, this file closes gaps the review
- * gate found unverified (REVIEW-FLAGS.md, spec 07): a duplicate Select is a
- * no-op, two occurrences of one recurring event get independent rows, and
+ * Beyond the base select/unselect flow, this file closes four gaps the
+ * review gate found unverified (REVIEW-FLAGS.md, spec 07): a duplicate
+ * Select is a no-op, two occurrences of one recurring event get independent
+ * rows, /feed and /calendar stay in sync without a manual refresh, and
  * archived/cut community filtering actually runs against a real join
  * (loadFeedData), not just the pure lib/feed/ functions
  * tests/feed-occurrences.test.ts already covers.
- *
- * PRD §2.5 fix (2026-09-08): `/calendar` was folded into `/feed` as one
- * merged view (month grid + list, day-click scrolls the list), so the tests
- * that used to drive /feed and /calendar as two separate routes -- checking
- * they stayed in sync, and that /calendar showed only committed selections
- * -- are gone. What replaces them below drives the grid and the list as the
- * one page they now are.
  *
  * Required environment (in CI these are repository secrets; see REVIEW.md):
  *   NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY,
@@ -424,6 +418,50 @@ test.describe("feed", () => {
     );
   });
 
+  test("a selection on /feed is reflected on /calendar without a manual refresh, and vice versa", async ({
+    page,
+  }) => {
+    // Visit /calendar once first, via a client-side nav link, so its route
+    // has something in the client router cache that a missing
+    // revalidatePath("/calendar") would actually leave stale.
+    await page.getByRole("link", { name: "Calendar" }).click();
+    await expect(page).toHaveURL(/\/calendar/);
+    await page.getByRole("link", { name: "Feed", exact: true }).click();
+    await expect(page).toHaveURL(/\/feed/);
+
+    await expect(page.getByText(FIXTURE_TITLE)).toBeVisible({ timeout: 20_000 });
+    const feedCard = page.locator("article", { hasText: FIXTURE_TITLE });
+    await feedCard.getByRole("button", { name: "Select" }).click();
+    await expect(feedCard.getByRole("button", { name: "Added" })).toBeVisible({
+      timeout: 10_000,
+    });
+
+    // Client-side nav, not a hard reload -- this is exactly what
+    // revalidatePath("/calendar") in actions.ts must keep from serving stale.
+    await page.getByRole("link", { name: "Calendar" }).click();
+    await expect(page).toHaveURL(/\/calendar/);
+
+    // The Calendar's MiniCard has no test id; its title <p> and the
+    // Select/Added button are two levels apart (title -> label wrapper div ->
+    // the row div that also holds the button), so walk up from the title.
+    const calTitle = page.getByText(FIXTURE_TITLE, { exact: true });
+    const calRow = calTitle.locator("xpath=../..");
+    await expect(calRow.getByRole("button", { name: "Added" })).toBeVisible({ timeout: 10_000 });
+
+    // /calendar is committed-only (spec 07 addendum: calendar-and-community-
+    // fields, decision 1) -- unselecting here removes the entry from the
+    // list entirely rather than toggling it back to a "Select" state in
+    // place, since it no longer has a committed selection to show.
+    await calRow.getByRole("button", { name: "Added" }).click();
+    await expect(page.getByText(FIXTURE_TITLE)).toHaveCount(0, { timeout: 10_000 });
+
+    await page.getByRole("link", { name: "Feed", exact: true }).click();
+    await expect(page).toHaveURL(/\/feed/);
+    await expect(feedCard.getByRole("button", { name: "Select" })).toBeVisible({
+      timeout: 10_000,
+    });
+  });
+
   test("an archived community's events are excluded from the feed; a cut community's are not", async ({
     page,
   }) => {
@@ -435,46 +473,57 @@ test.describe("feed", () => {
     await expect(page.getByText(FIXTURE_ARCHIVED_TITLE)).toHaveCount(0);
   });
 
-  test("the calendar grid marks the day of a scraped event with no selection needed, and clicking it scrolls the list there with no notice (PRD §2.5 fix: /calendar merged into /feed)", async ({
+  test("an unselected event shows on /feed but not /calendar; selecting it makes it appear on /calendar too (spec 07 addendum: calendar-and-community-fields)", async ({
     page,
   }) => {
     await expect(page.getByText(FIXTURE_TITLE)).toBeVisible({ timeout: 20_000 });
 
-    const fixtureSectionId = await page
-      .locator("section", { hasText: FIXTURE_TITLE })
-      .first()
-      .getAttribute("id");
-    if (!fixtureSectionId) throw new Error("Could not find the fixture's day section id.");
-    const fixtureDate = fixtureSectionId.replace("day-", "");
+    await page.getByRole("link", { name: "Calendar" }).click();
+    await expect(page).toHaveURL(/\/calendar/);
+    // committedOnly (lib/feed/occurrences.ts) against a real join, not just
+    // the pure-function coverage in tests/feed-occurrences.test.ts.
+    await expect(page.getByText(FIXTURE_TITLE)).toHaveCount(0);
 
-    // The grid reflects every scraped event in the window, not just
-    // committed ones -- merging /calendar into /feed removed the old
-    // committed-only distinction along with the second page it existed to
-    // avoid duplicating, so no Select click is needed for the day to mark.
-    const dayButton = page.getByRole("button", { name: `Day ${fixtureDate}` });
-    await expect(dayButton).toHaveClass(/bg-foreground\/10/);
+    await page.getByRole("link", { name: "Feed", exact: true }).click();
+    await expect(page).toHaveURL(/\/feed/);
+    const card = page.locator("article", { hasText: FIXTURE_TITLE });
+    await card.getByRole("button", { name: "Select" }).click();
+    await expect(card.getByRole("button", { name: "Added" })).toBeVisible({ timeout: 10_000 });
 
-    await dayButton.click();
-    await expect(page.locator(`#${fixtureSectionId}`)).toBeInViewport();
-    await expect(page.getByRole("status")).toHaveCount(0);
+    await page.getByRole("link", { name: "Calendar" }).click();
+    await expect(page).toHaveURL(/\/calendar/);
+    await expect(page.getByText(FIXTURE_TITLE)).toBeVisible({ timeout: 10_000 });
   });
 
-  test("clicking a day with nothing scheduled scrolls to the nearest day that does -- it never silently no-ops", async ({
+  test("clicking a day on /calendar scrolls to it when committed, or to the nearest committed day when not -- it never silently no-ops (spec 07 addendum: calendar-and-community-fields)", async ({
     page,
   }) => {
     await expect(page.getByText(FIXTURE_TITLE)).toBeVisible({ timeout: 20_000 });
+    const feedCard = page.locator("article", { hasText: FIXTURE_TITLE });
+    await feedCard.getByRole("button", { name: "Select" }).click();
+    await expect(feedCard.getByRole("button", { name: "Added" })).toBeVisible({ timeout: 10_000 });
 
-    const fixtureSectionId = await page
+    await page.getByRole("link", { name: "Calendar" }).click();
+    await expect(page).toHaveURL(/\/calendar/);
+    await expect(page.getByText(FIXTURE_TITLE)).toBeVisible({ timeout: 10_000 });
+
+    const committedSectionId = await page
       .locator("section", { hasText: FIXTURE_TITLE })
       .first()
       .getAttribute("id");
-    if (!fixtureSectionId) throw new Error("Could not find the fixture's day section id.");
+    if (!committedSectionId) throw new Error("Could not find the fixture's Upcoming section id.");
+    const committedDate = committedSectionId.replace("day-", "");
 
-    // The fixture is seeded a week out, so "today" has nothing scheduled --
+    // Exact match: clicking the fixture's own day scrolls it into view, no notice.
+    await page.getByRole("button", { name: `Day ${committedDate}` }).click();
+    await expect(page.locator(`#${committedSectionId}`)).toBeInViewport();
+    await expect(page.getByRole("status")).toHaveCount(0);
+
+    // The fixture is seeded a week out, so "today" has nothing committed --
     // the click must still produce something, not a no-op.
     const todayKey = new Date().toISOString().slice(0, 10);
     await page.getByRole("button", { name: `Day ${todayKey}` }).click();
-    await expect(page.getByRole("status")).toContainText("Nothing scheduled");
-    await expect(page.locator(`#${fixtureSectionId}`)).toBeInViewport();
+    await expect(page.getByRole("status")).toContainText("Nothing committed");
+    await expect(page.locator(`#${committedSectionId}`)).toBeInViewport();
   });
 });

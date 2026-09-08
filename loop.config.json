@@ -3,7 +3,7 @@
   "maxItems": null,
   "dryRun": false,
   "push": false,
-  "haltBeforeMigration": true,
+  "haltBeforeMigration": false,
   "timeoutMinutes": 180,
 
   "_comments": {

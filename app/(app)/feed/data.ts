@@ -138,7 +138,18 @@ export async function readCommunitiesById(
   return byId;
 }
 
-/** Every selection for the user, keyed on `${event_id}:${occurrence_at}`. */
+/**
+ * The join key for an occurrence. Both sides of the join parse the instant
+ * through `Date` before keying: Postgres returns occurrence_at as
+ * "...+00:00", but expandOccurrences's own occurrenceAt is always
+ * `Date#toISOString()`'s "...Z" form -- comparing the raw strings would never
+ * match a real selection back to its occurrence.
+ */
+function occurrenceKey(eventId: string, occurrenceAt: string): string {
+  return `${eventId}:${new Date(occurrenceAt).toISOString()}`;
+}
+
+/** Every selection for the user, keyed by occurrenceKey. */
 export async function readSelections(
   supabase: Db,
   userId: string,
@@ -153,7 +164,7 @@ export async function readSelections(
   const byKey = new Map<string, SelectionRow>();
   for (const row of data ?? []) {
     const parsed = selectionRow.parse(row);
-    byKey.set(`${parsed.event_id}:${parsed.occurrence_at}`, parsed);
+    byKey.set(occurrenceKey(parsed.event_id, parsed.occurrence_at), parsed);
   }
   return byKey;
 }
@@ -207,7 +218,8 @@ export async function loadFeedData(
         recurrence: event.recurrence,
         sourceUrl: event.source_url,
         rsvpUrl: event.rsvp_url,
-        selection: selectionsByKey.get(`${occurrence.eventId}:${occurrence.occurrenceAt}`) ?? null,
+        selection:
+          selectionsByKey.get(occurrenceKey(occurrence.eventId, occurrence.occurrenceAt)) ?? null,
       });
     }
   }

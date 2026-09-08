@@ -17,7 +17,7 @@ Paste ONE at a time. Each spec file in docs/specs/ has scope, acceptance criteri
 | 11 | weekly-planning-and-invites | PRD §3.5–3.6, §4.4, 4.6 (weekly plan from feed, ongoing discovery job, invite suggestions, group-invite suggestion) | Sonnet | 1–2 |
 
 ## Actual build order so far
-`00 → 01 → 02 → 12a (pulled forward) → 03 → 04 → 05 → 06`. The table above is the plan; this is what was run.
+`00 → 01 → 02 → 12a (pulled forward) → 03 → 04 → 05 → 06 → 13 (pulled forward)`. The table above is the plan; this is what was run.
 
 **Spec 04 was re-drafted before it was built.** The original one-page sketch
 (`04-activities-and-focus.md`, written before specs 01–03 existed) was replaced
@@ -45,6 +45,23 @@ project, migrated to the real account instead. Added migration 0011
 (`calendar_kind_checked_at`) and one new top-level module, `lib/scraping/`,
 alongside `lib/discovery/`.
 
+**Out of order: spec 13 ran on 2026-09-07/08, right after spec 06, for the
+same reason 12a jumped the queue.** It changes how every spec after it gets
+built (`docs/specs/13-autonomous-runner.md`), so it is worth more before specs
+07–11 than after them. Built from that spec, no addendum. A planner, builder
+and reviewer agent (`docs/agents/`) replace the old per-item "continue"
+checkpoint with the tier rule in `CLAUDE.md`, a `NEEDS_HUMAN.md` protocol
+(`scripts/needs-human.ts`) for anything only a person can do, a committed
+permissions allowlist (`.claude/settings.json`) for unattended sessions, and a
+loop (`scripts/run-spec.sh`, `npm run loop` / `loop:once`) that drafts,
+builds, waits for CI and reviews one spec per iteration. The Supabase CLI
+(`supabase`, a dev dependency) replaces hand-applying migrations through the
+dashboard SQL Editor, linked to `wqawpwbgrsjusbdopgbi`; migrations 0001–0011
+were reconciled into its tracking table (`npm run migrate`,
+`npm run migrate:status`). This spec is the last one built the old
+per-item-checkpoint way, by design — see its own "Decisions made while
+drafting."
+
 Next is spec 07 — the feed and calendar views. Spec 06 writes real `events`
 rows on demand from the Communities page; nothing reads them back yet except
 the raw table, and spec 07's placeholder `/feed` page is what spec 06's
@@ -64,4 +81,10 @@ Two decisions were settled during spec 02 that change what specs 05 and 06 must 
 **Usable-daily target:** through spec 07.
 **Full spec:** through spec 11.
 
-Spec files 01–06 are written and built. Specs 07–11 get written when their phase starts: ask a planning chat to draft each one per `docs/specs/README.md`, which sets the document kinds, the required sections and the reading a drafter does first, so each spec reflects what actually got built rather than what was planned. The code schema the spec writes against is `docs/CONVENTIONS.md`.
+Spec files 01–06 and 13 are written and built. Specs 07–11 are drafted by the
+planner agent (`docs/agents/PLANNER.md`) when the loop reaches them, per
+`docs/specs/README.md`, which sets the document kinds, the required sections
+and the reading a drafter does first, so each spec reflects what actually got
+built rather than what was planned — not by a person asking a planning chat
+by hand, which was the process before spec 13. The code schema the spec
+writes against is `docs/CONVENTIONS.md`.

@@ -1,354 +1,362 @@
-# REVIEW — spec 06, calendar scraping
+# REVIEW — spec 13, autonomous runner
 
-Built 2026-09-07 from `docs/specs/06-calendar-scraping.md`, with
-`06-scheduled-jobs-addendum.md` read first as the spec required — its
-model-provider fallback chain is for spec 11's unattended job and is not used
-anywhere in this spec. Tag `spec-06`.
+Built 2026-09-07/08 from `docs/specs/13-autonomous-runner.md`, no addendum.
+Out of order right after spec 06, for the same reason 12a jumped the queue:
+it changes how every spec after it gets built, so it is worth more before
+specs 07–11 than after them. Checkpointed the old per-item way, as the spec
+itself required — the last one built under those rules. Tag `spec-13`.
 
-**Item 0 was not the fix the spec thought it was drafting.** The spec assumed
-a dedicated e2e account was colliding with a separate real account and needed
-pinning apart. Investigating it found the opposite: there was only ever one
-account with any real data in it, and it was the e2e account. See "Where I
-deviated, and why" below before anything else — it changes what "the real
-account" means for every spec after this one.
+All prerequisites in the spec's own table were already satisfied in
+`.env.local` before this session started (`SUPABASE_ACCESS_TOKEN`,
+`GH_TOKEN`, the Google OAuth and VAPID pairs), except `SUPABASE_DB_PASSWORD`,
+which turned out to be stale — see item 1 below.
 
-One migration (0011). No new dependency. `lib/scraping/` is a new top-level
-module, alongside `lib/discovery/`.
+One new dev dependency: `supabase` (flagged per `CLAUDE.md`, and pre-approved
+in the spec's own "Decisions made while drafting"). No migration files. No
+change to `docs/CONVENTIONS.md` or `docs/specs/README.md`, per Out of scope.
 
 ---
 
 ## What was built
 
-**Item 0 / scope item 1 — the e2e account collision, and what was actually
-under it.** `e2e/login.spec.ts` and `e2e/assessment.spec.ts` resolved the test
-account as `process.env.E2E_TEST_EMAIL ?? "e2e+gazelle@example.com"`; both now
-require a pinned `E2E_USER_ID` and fail loudly if it is missing, with no
-email-based fallback anywhere. `scripts/setup-e2e-user.ts` creates the account
-once (idempotent) and prints the id.
+**Item 1 — migration runner.** `supabase` added as a dev dependency, linked
+to `wqawpwbgrsjusbdopgbi` via `supabase link --project-ref ... -p
+"$SUPABASE_DB_PASSWORD"`. `npm run migrate` runs `supabase db push --linked`;
+`npm run migrate:status` runs `supabase migration list --linked`; both wrap
+the call in `bash -c 'set -a && source .env.local && set +a && supabase
+...'`, because the CLI is a Go binary with no `tsx --env-file` support and no
+`.env.local` auto-loading of its own — confirmed by testing (the bare
+`--linked` flag fails without the `set -a` export).
 
-Running `npm run test:e2e` to verify the fix reproduced the exact bug it was
-meant to end: `resetUser` deleted the "Contra dance" activity — outright this
-time, not just orphaned — and all 9 communities came back `activity_id: null`.
-Reading `e868f1f2-...`'s (the e2e account's) own data showed why: it, not
-`emanstof@gmail.com`, held the 9 real communities, `onboarding_state:
-"models_configured"`, and a real `profiles` row. `emanstof@gmail.com` had 0 of
-everything except a `profiles` row from spec 01's manual signup and 14
-`run_log` rows from `tests/live-gateway.test.ts` attributing to
-`auth.users[0]`. Git history confirms how: spec 03's own REVIEW.md says
-verification ran "on the dedicated `e2e+gazelle@example.com` account" and
-names spec 02 and the spec 12a Playwright test as using the same technique —
-an admin-minted magic link stood in for "a real authenticated request" from
-spec 02 onward, and once the account already existed (created by the spec 12a
-e2e test itself), later sessions kept reusing it rather than tracking a
-separate real user.
+`SUPABASE_DB_PASSWORD` as recorded in `.env.local` did not authenticate
+against the live project (direct connection and the session pooler both
+failed identically with "password authentication failed"), which pointed at
+a stale password rather than a connection-method problem. Eric reset it via
+the dashboard and gave the new value; the rest of the item proceeded from
+there.
 
-**Fixed on Eric's explicit confirmation**, not assumed:
-`scripts/migrate-real-data-to-emanstof.ts` recreated the "Contra dance"
-activity (fixed id `44df58d7-98c2-4cc6-ac58-e0e4cfe9acab`, `status: active`,
-`kind: recurring_community`; `rationale`/`fit_score` are advisory-only and
-unrecoverable, left null rather than invented) under `emanstof@gmail.com`,
-moved the 9 communities' `user_id` and `activity_id`, and advanced its
-`onboarding_state` to `activities_selected` so the data is reachable. Verified
-by re-running the full `npm run test:e2e` suite: 9 communities linked before,
-9 after, all 4 tests green. `e2e+gazelle@example.com` now owns 0 activities
-and 0 communities, which is what makes the original code fix (pin
-`E2E_USER_ID`, no fallback) actually true rather than true-by-coincidence.
+`npm run migrate:status` then showed something the spec's own drafting
+didn't anticipate: the dashboard's SQL Editor had already tracked migrations
+0001–0010 in `supabase_migrations.schema_migrations`, but under its own
+timestamp-based version ids (e.g. `20260906023046`), not the repo's
+zero-padded filenames — and 0011 wasn't tracked at all. The spec's literal
+instruction ("`repair --status applied` for 0001 through 0011") would have
+left both sets of tracking rows in place at once. Reconciled instead, on
+Eric's explicit confirmation (the repair command was itself blocked by the
+auto-mode classifier as a live-database write, correctly): reverted the ten
+stray timestamp-based rows, then repaired 0001–0011 in under their real
+names. Bookkeeping only — this table is the CLI's own tracking metadata, not
+app schema or data, and nothing in it changes what tables or rows exist.
 
-`scripts/verify-e2e-isolation.ts` runs `npm run test:e2e` and diffs the real
-activity's community links before and after — this is the acceptance
-criterion checked for real, not read off the test code.
+Verified live end to end with a throwaway `0012_noop.sql`: `npm run migrate`
+applied it to the real project, `npm run migrate:status` showed it applied,
+then it was reverted (`migration repair --status reverted 0012`) and the
+file deleted before committing, leaving `migrate:status` showing exactly
+0001–0011 applied and nothing pending or stray.
 
-**Also done in this session, at Eric's direction, using the app itself:** the
-two known duplicate `communities` rows (flagged at the spec-05-dedupe gate)
-archived through `archiveCommunity`/`updateCommunity` — driven via a real
-production session under a real magic-link, never a database write. Kept
-"Folklore Society of Greater Washington (FSGW)" over "The Folklore Society of
-Greater Washington (FSGW)" (the kept row has `location`/`cost` populated and
-its own `source_url` matches its own `website`/`calendar_url`; the archived
-row has neither and its `source_url` actually pointed at the *other* pair's
-page). Kept "Silver Spring Contra Dance" over the longer-named row — the two
-were equally complete, so the tiebreak was name length, per the spec's own
-rule. Confirmed after: still 9 rows total, both archived rows' other fields
-unchanged.
+**Item 2 — the tier rule.** `CLAUDE.md`'s checkpoint section replaced: a
+session builds one whole spec then stops, no more per-item "continue" wait.
+Low tier builds straight through; Medium tier proceeds with red-before-green
+tests, `--dry-run` where one exists, `npm run migrate` for any migration, and
+a flag in `REVIEW.md`; High tier writes `NEEDS_HUMAN.md` and stops the
+session. Five lines added, the old "WAIT for continue" line removed; the
+verification rule, hard rules and `REVIEW.md` requirement are untouched.
 
-**Item 2 — calendar-kind detection.** Migration 0011 adds
-`communities.calendar_kind_checked_at` (nullable timestamptz; no enum change).
-`lib/discovery/calendar-kind.ts` (pure) decides `ics`/`api`/`html`/`null`:
-a known Meetup or Eventbrite host classifies `api` unconditionally, before
-even checking whether it responds — their real endpoints often refuse an
-unauthenticated HEAD/GET, and a host already recognized should never read as
-"unreachable" because probing it failed. `.ics` extension is also
-unconditional. Only the residual case (neither of those) needs a probe:
-`text/calendar` content-type is `ics`, anything else that responds is `html`,
-nothing responding is `null`. `lib/discovery/calendar-kind-server.ts` wires a
-real HEAD (falling back to GET on 405) through `fetch.ts`'s `USER_AGENT`/
-timeout and the same `PageFetcher.isAllowed` robots check every other fetch in
-this app goes through, and skips the request entirely for a known API host.
-A community with no `calendar_url` is never touched at all — no request, no
-`calendar_kind_checked_at` write.
+**Item 3 — agent prompts.** `docs/agents/PLANNER.md`, `BUILDER.md`,
+`REVIEWER.md`. Planner reads `STATUS.md`'s Next section (which, in this
+repo, holds more than one bullet — see "Where I deviated" below), drafts a
+spec per `docs/specs/README.md`'s eight sections only if none exists yet for
+that number, self-checks its own draft against those eight sections, commits
+untagged (`docs: draft spec NN`), never pushes, never builds. Builder moves
+the spec from Next to In Progress, builds under the tier rule, writes
+`REVIEW.md`, moves it to Done, tags `spec-NN`, pushes, and stops — never
+drafts the next spec. Reviewer reads the spec, `REVIEW.md`, and the
+tag-to-tag diff, checks every acceptance criterion has evidence, checks
+every Medium-tier flag actually did red-before-green and `--dry-run`, checks
+nothing under Out of scope was built, writes `REVIEW-FLAGS.md` with each
+line labelled `blocking:` or `note:`, never edits code.
 
-**Item 3 — ICS parsing.** `lib/scraping/ics.ts` (pure): a minimal RFC 5545
-`VEVENT` parser. Unfolds continuation lines (a leading space/tab is a fold
-marker, not content, so it is stripped and the lines joined with nothing
-inserted). Unescapes `TEXT` values per section 3.3.11. `DATE`/`DATE-TIME`:
-`Z` is a direct UTC read; `TZID` or a floating time resolves against a
-caller-supplied default zone using `Intl.DateTimeFormat`'s offset (no
-timezone-database dependency added — a documented, deliberately minimal
-choice, not an oversight). `RRULE` is captured as raw text only, never
-expanded. A `VEVENT` missing `SUMMARY` or `DTSTART`, an unparseable `DTSTART`,
-or an unterminated `BEGIN:VEVENT` is skipped with a reason and a log-friendly
-context string; one bad block never loses the rest of the feed. A `DTEND`
-that parses before `DTSTART` is dropped on its own, not the whole event.
-`lib/scraping/ics-server.ts` fetches through the same primitives item 2 uses;
-`readCapped` was extracted from `fetch.ts` and exported rather than copied a
-second time.
+**Item 4 — `NEEDS_HUMAN.md` protocol.** `scripts/needs-human.ts`: writes the
+file at the repo root (spec/item, what is needed, exact env var names or
+clicks, what the session did before stopping), commits and pushes it, then
+opens a GitHub issue titled `NEEDS HUMAN: spec NN item M` with the same body
+via a direct call to the GitHub REST API using `GH_TOKEN` read from the
+environment — not whatever account the ambient `gh` CLI happens to be
+logged into, which matters since this machine's `gh` is authenticated as a
+person, not necessarily the identity the loop should act as. The repo
+owner/name are read from `git remote get-url origin` rather than hardcoded.
+`--item` is optional (a halt can be spec-wide — CI red, the 3-hour timeout —
+rather than tied to one scope item). `--dry-run` prints the file and issue
+body and does nothing else.
 
-**Item 4 — the scrape round.** `lib/scraping/plan.ts`'s `scrapeCommunity`:
-given a community and its `calendar_kind`, `ics` → item 3's parser; `api` →
-`not_supported` (no adapter exists — see Out of scope); `html` → fetch +
-`event_extraction`; `null` → detect first (persisting the result), then
-scrape using what was found, all in one call. Deliberately not a round
-engine: a calendar is one feed or one page fetched once, not an open-ended
-search, so there is no `nextStep`/phase/budget here, per the spec's own
-drafting decision against copying spec 05's reducer for a problem it doesn't
-have.
+Verified live, for real, during this item's own build: ran once without
+`--dry-run`, which wrote `NEEDS_HUMAN.md`, committed and pushed it, and
+opened `github.com/emanstof-png/social-app/issues/1`. Resolved immediately
+after (deleted the file, committed, closed the issue with a comment
+explaining it was a self-test), since nothing was actually blocked.
 
-`source_url` is stamped by `plan.ts` alone, from the URL actually fetched —
-the `.ics` feed's own URL, or the page's real URL (which a redirect can make
-different from `calendar_url`). Never from the model, and never from an ICS
-`VEVENT`'s own `URL` property, which is mapped to `rsvp_url` instead — a link
-the *event* points to, not evidence of where the listing was found.
-`hashKeyFor(communityId, title, startsAt)` is the one place `dedupe_hash` is
-computed: sha256 of the community id and a `nameKey`-shaped normalized title
-(not the broader `matchKey` — two events on the same date are not presumed
-the same event the way two org-name variants are). `mergeEvents` keys on the
-hash directly against the literal `(user_id, dedupe_hash)` index; `status`
-and `scraped_at` are excluded from the update diff, which is what keeps a
-byte-identical re-scrape a true zero-write.
+**Item 5 — permissions.** `.claude/settings.json` (committed): `allow` list
+covers `npm run *`, `npx supabase *`, `npx tsx *`, `npx vitest *`, `npx
+playwright *`, `git *`, plus `Edit`/`Write`; `deny` covers `git push
+--force*` and `git reset --hard*` (deny wins over the broader `git *` allow —
+Claude Code's own permission precedence, not something this file has to
+implement). `defaultMode: acceptEdits`, so a headless session runs under
+`--permission-mode acceptEdits` without also needing
+`--dangerously-skip-permissions`.
 
-**Found and fixed before writing tests:** `event_extraction`'s
-`registration_required` is nullable (the model may not know), but the
-`events` column is `boolean not null default false`. An insert carrying an
-explicit `null` would have failed against the live table — coalesced to
-`false` at the mapping boundary in `plan.ts`, matching the column default's
-own meaning.
+Verified live: a real `claude -p` session was launched with this exact
+config (`--permission-mode acceptEdits`, this repo's `.claude/settings.json`)
+and told to run `curl https://example.com` and report ALLOWED or DENIED. It
+reported **DENIED**.
 
-**Item 5 — the real `event_extraction` prompt.** Replaces the spec 02 stub.
-Never invents time/price/location (null instead). `starts_at`/`ends_at` are
-full ISO 8601 with the correct UTC offset for the given timezone, resolving
-relative dates against `today`. A page describing one recurring pattern
-returns **one** event with the pattern in `recurrence`, in the page's own
-words — never an invented series, the same choice item 3 makes for `RRULE`.
-`event_type`'s three-way meaning for an *event* (not a community) is written
-into the prompt as this component's own judgment call — see "Where I
-deviated." `sampleInput` replaced with a real two-event calendar-page example.
+**Item 6 — the loop.** `scripts/run-spec.sh` (`npm run loop` / `loop:once`).
+One iteration: halt if `NEEDS_HUMAN.md` exists, if `STATUS.md`'s Blocked
+section has a bullet other than its placeholder, or if Next names no spec
+(`next_spec_number` scans Next for the first bullet matching `spec [0-9]+`,
+since this repo's actual Next section carries other follow-up notes above
+the spec bullet — see "Where I deviated"); `git pull --ff-only`; run the
+planner; if the spec file did **not** exist before the planner ran (it just
+drafted one), stop the iteration right there rather than building it in the
+same breath — this is the review window the spec's "Decisions made while
+drafting" section describes ("the person can read any draft... and delete
+the tag-less file to send it back"), and it does not exist unless the loop
+itself enforces the gap; otherwise (the spec already existed, so the planner
+was a no-op) run the builder under `run_with_timeout` (3-hour default,
+`BUILDER_TIMEOUT_SECONDS` overridable), wait for CI on the pushed tag via
+`gh run list` / `gh run watch --exit-status`, run the reviewer, halt on any
+`blocking:` line in `REVIEW-FLAGS.md`. Every halt path calls `npm run
+needs-human` itself unless the agent that hit the condition already wrote
+`NEEDS_HUMAN.md` (checked first, so the loop never double-reports).
 
-**Item 6 — default model.** `event_extraction` already carried
-`discovery_extraction`'s default model from spec 02; it was only missing the
-required reasoning comment. Added, identical reasoning: per-page volume work,
-not planning. `COMPONENTS`' dropdown description already read in the present
-tense and needed no change.
+`run_with_timeout` is a portable stand-in for GNU coreutils `timeout`, absent
+on stock macOS, which is where this loop runs. **Two real implementation
+bugs were found only by testing it, before it ever touched a real spec:**
 
-**Item 7 — the Communities page action.** `scrapeCommunityEvents` in
-`app/(app)/communities/actions.ts`: reads the community and the profile's
-timezone, wires `scrapeDepsFor`, calls `scrapeCommunity`, maps its outcome
-onto the existing `ActionResult` — `unreachable`/`fetch_failed` become a real
-error with Retry, everything else is a success note — reused rather than
-inventing a second result shape, per the spec. `communities-view.tsx`: a
-community with a `calendar_url` gets a "Find events" button plus a kind badge
-once detected and an "unreachable" note if a past detection failed; a
-community without one shows why instead of a button. A successful result
-links to `/feed`, spec 07's existing placeholder page — there is nothing else
-to link to yet, by this item's own scope.
+1. The first design ran the timed job in the background alongside a
+   `(sleep "$seconds"; ...) &` watchdog subshell, killing the watchdog after
+   the real job finished. That leaves the watchdog's own `sleep` child
+   process orphaned when the real job finishes *first* (the common case) —
+   killing the subshell's PID does not kill the child it forked to run
+   `sleep`, so the orphan survives (for up to the rest of the 3-hour cap in
+   production) still holding this script's stdout redirect open, which hangs
+   the whole script waiting for `tee` to see EOF even though the timed job
+   already returned successfully. Found by testing a "success" scenario, not
+   the timeout scenario, in a throwaway git fixture — the script hung with no
+   error.
+2. Fixing that by polling instead of backgrounding a watchdog surfaced a
+   second issue: piping the timed call through `| tee -a "$LOG_FILE"` under
+   `set -m` (needed for process-group kill on the actual timeout path) killed
+   more of the pipeline than just the timed job when a timeout genuinely
+   fired, producing exit code 143 (plain SIGTERM) instead of the intended 124
+   sentinel, so a real timeout was misclassified as a generic builder
+   failure. Fixed by switching every `claude`/`gh`/`git` call in this script
+   from `| tee -a` to a plain `>> "$LOG_FILE" 2>&1` append redirect, which
+   removes the shared-pipeline process group entirely.
+
+Verified against a throwaway fixture: a local bare `origin.git`, a cloned
+working repo with the same `STATUS.md` shape this real repo has, and stub
+`claude`/`gh` executables standing in for the real agents and CI (so this
+exercises `run-spec.sh`'s own control flow, not a live multi-hour build).
+Six scenarios, all passing after the two fixes above: (1) no spec file yet →
+drafts it, commits, stops before building; (2) spec file already present →
+full build → tag → push → CI wait → review, no blocking flags; (3) a
+builder that hangs, 3-second cap → timed out (124), `needs-human` called by
+the loop with the right message, **zero orphaned processes** afterward
+(checked with `ps`); (4) `NEEDS_HUMAN.md` already present → immediate halt,
+confirmed no `claude` invocation happened at all; (5) reviewer writes a
+`blocking:` line → halt, `needs-human` called once; (6) builder itself
+writes `NEEDS_HUMAN.md` (a planted High-tier stop) → loop halts and does
+**not** call `needs-human` a second time.
+
+**Item 7 — docs and the review gate.** This file; `CHANGELOG.md` (one
+line); `STATUS.md` (spec 13 moved to Done with a full per-item account, plus
+the required paragraph under the header saying the loop now owns Next → In
+Progress → Done and the human's job is `NEEDS_HUMAN.md`); `docs/
+BUILD_PHASES.md` (build order now includes 13, a paragraph on why it moved
+out of order, and the closing paragraph rewritten to say specs 07–11 are
+drafted by the planner agent, not a person pasting into a planning chat);
+`docs/ARCHITECTURE.md` (three loop-only environment variables and where each
+lives, plus a full "Build loop" subsection naming the three agents, the tier
+rule, the `NEEDS_HUMAN.md` protocol, the permissions allowlist, and the loop
+itself).
 
 ### Files touched
 
-`e2e/login.spec.ts`, `e2e/assessment.spec.ts`, `.github/workflows/ci.yml`,
-`package.json`, `docs/specs/06-calendar-scraping.md`,
-`scripts/setup-e2e-user.ts`, `scripts/verify-e2e-isolation.ts`,
-`scripts/migrate-real-data-to-emanstof.ts`,
-`scripts/archive-duplicate-communities.ts`, `scripts/verify-scrape-live.ts`,
-`supabase/migrations/0011_calendar_kind_detected_at.sql`,
-`lib/discovery/calendar-kind.ts`, `lib/discovery/calendar-kind-server.ts`,
-`lib/discovery/fetch.ts`, `lib/schemas/community.ts`,
-`tests/calendar-kind.test.ts`, `tests/schemas.test.ts`, `lib/scraping/ics.ts`,
-`lib/scraping/ics-server.ts`, `tests/ics.test.ts`,
-`tests/fixtures/ics/*.ics` (5 files), `lib/scraping/plan.ts`,
-`lib/scraping/plan-server.ts`, `tests/scraping-plan.test.ts`,
-`lib/llm/components/event-extraction.ts`, `lib/llm/catalog.ts`,
-`app/(app)/communities/actions.ts`, `app/(app)/communities/data.ts`,
-`app/(app)/communities/communities-view.tsx`, `CHANGELOG.md`, `STATUS.md`,
-`docs/BUILD_PHASES.md`, `docs/ARCHITECTURE.md`, this file.
+`CLAUDE.md`, `package.json`, `package-lock.json`, `.gitignore`,
+`docs/specs/13-autonomous-runner.md`, `docs/agents/PLANNER.md`,
+`docs/agents/BUILDER.md`, `docs/agents/REVIEWER.md`,
+`scripts/needs-human.ts`, `scripts/run-spec.sh`, `.claude/settings.json`,
+`supabase/config.toml`, `supabase/.gitignore`, `docs/ARCHITECTURE.md`,
+`STATUS.md`, `CHANGELOG.md`, `docs/BUILD_PHASES.md`, this file.
 
 ---
 
 ## How to test it by hand
 
-1. **The e2e fix.** `npm run verify:e2e-isolation` — runs the full
-   `npm run test:e2e` and confirms the real "Contra dance" activity's 9
-   communities are unchanged after. (Needs `E2E_USER_ID` in `.env.local`;
-   `npm run setup:e2e-user` prints it if missing.)
-
-2. **A real HTML scrape.** Sign in as `emanstof@gmail.com`, open
-   `/communities`, find "Folklore Society of Greater Washington (FSGW)", and
-   click **Find events**. If `event_extraction`'s model is currently pointed
-   at a dead OpenRouter free slug (see "Where I deviated" below), switch it
-   to `gemini-3.6-flash` on `/settings` first. Expect a `WEB PAGE` badge and,
-   a few seconds later, "Found N events... View them in your feed."
-
-3. **Idempotency.** Click **Find events** again on the same community.
-   Expect the same event count, not double, and `status` unchanged on each
-   row (`select status from events`).
-
-4. **A community without a calendar.** "Friday Night Dancers, Inc." has
-   `calendar_url: null` — its card shows "No calendar found for this
-   community yet." instead of a button.
-
-5. **Tests.** `npm test` runs 494 tests (`npm run typecheck` and `npm run
-   lint` are both clean).
+1. **Migration runner.** `npm run migrate:status` — expect 0001–0011 listed
+   with matching `local`/`remote` values and nothing else.
+2. **`NEEDS_HUMAN.md` protocol, dry.** `npm run needs-human -- --dry-run
+   --spec 99 --needed "test" --did "test"` — prints the file and issue body,
+   writes and opens nothing (`git status` clean, no new GitHub issue).
+3. **Permissions allowlist.** With `.claude/settings.json` in place, run
+   `claude -p "Run: curl https://example.com" --permission-mode acceptEdits`
+   from the repo root — expect it refused, not retried.
+4. **The loop's control flow**, without touching real specs or a real
+   3-hour build: repoint `PATH` at a directory with stub `claude`/`gh`
+   scripts (see this session's own testing above for the exact shape) and
+   run `BUILDER_TIMEOUT_SECONDS=3 bash scripts/run-spec.sh` against a
+   throwaway clone — this is the only way to see every branch (timeout,
+   blocking review, pre-existing `NEEDS_HUMAN.md`) without waiting hours or
+   spending real agent sessions.
+5. **The real thing**, when ready: `npm run loop:once` in this repo, with
+   `STATUS.md`'s Next still pointing at spec 07 and no
+   `docs/specs/07-*.md` present. Expect a committed, untagged spec 07 draft
+   and the script stopping before building. Run it again to build spec 07
+   for real — see "What I was unsure about" below before doing this.
+6. **Tests.** `npm test` runs 494 tests unchanged (this spec added no new
+   Vitest suite — everything it built is shell, a TypeScript CLI script, and
+   docs, none of which this repo's test convention covers with a unit
+   suite of its own; the fixture-based testing above is this spec's
+   substitute, the same way `docs/agents/*.md` prompts have no unit test).
 
 ---
 
 ## Verified
 
-Per the CLAUDE.md rule, **both halves — and you should know exactly which
-parts of "both" happened live versus in the unit suite.**
+Per the `CLAUDE.md` rule, and you should know exactly which parts happened
+live versus against a throwaway stand-in, because this spec is unusual: **it
+builds the process, not the app**, so "a production server serving a real
+authenticated request" doesn't apply the way it did for specs 01–06. The
+spec's own acceptance criteria substitute "the loop itself, run for real" —
+and that substitute is **not fully done**. What is:
 
-- `next build` passes, `tsc --noEmit` clean, `eslint` clean, 494 tests pass
-  (81 new: 14 calendar-kind, 13 ics parsing (plus the 5 fixture files), 13
-  scraping-plan, plus the item-1 fixes).
-- **A production server (`next start`, not the dev server) was driven
-  through the real "Find events" action under a real magic-link session,
-  more than once, with real consequences each time:**
-  - First run: `event_extraction`'s model for this account was
-    `z-ai/glm-5.2:free`, which OpenRouter has discontinued on the free tier
-    (HTTP 404, "This model is unavailable for free"). The UI showed that
-    exact message with a Retry button — one of this spec's own acceptance
-    criteria ("a forced gateway failure surfaces the real provider error
-    with a Retry control"), satisfied for real before it was tried on
-    purpose.
-  - Second run, switched to the current documented default
-    (`minimax/minimax-m3:free`): **also** HTTP 404, same message, different
-    slug. Not a code defect — OpenRouter's free-tier pool churning is
-    already documented behavior in this repo (spec 02's REVIEW.md) — but a
-    live, current instance of it, and a serious one: see "Where I deviated."
-  - Third run, switched to `gemini-3.6-flash`: real fetch to
-    `fsgw.wildapricot.org/barn-dance`, real model call, **4 real events**
-    written with correct titles, correctly DST-adjusted UTC times
-    (`2026-09-13T17:00:00+00:00` = 1pm EDT, matching the page's "1 to 3 PM"),
-    and `source_url` stamped from the page actually fetched.
-  - Fourth run, same community again: 0 new, 4 updated, still 4 total — the
-    hash match found all four existing rows by id (no duplicates), but a few
-    fields came back phrased slightly differently by the model's second
-    pass, so this is not a byte-for-byte zero-write the way the ICS path and
-    `tests/scraping-plan.test.ts`'s idempotency test (a fixed fake extractor)
-    are. Inherent LLM variance on the html path, disclosed rather than
-    glossed over — the acceptance criterion asked for "no duplicate rows and
-    no status change," both true, not for identical field values on every
-    field.
-- **The ICS path is verified by tests only, not live.** Checked, not
-  assumed: none of the 9 real communities carry an actual `.ics`
-  `calendar_url` today. `tests/ics.test.ts` (13 tests, 5 required fixtures)
-  and `tests/scraping-plan.test.ts`'s ics cases are the only coverage. If a
-  real ICS feed turns up in a future discovery run, `scripts/verify-scrape-
-  live.ts "<community name>"` re-runs the same live check used above.
-- The deployed Vercel URL was not exercised this session; verification was
-  local `next start`.
+- `npm run lint`, `npm run typecheck`, `npm test` all clean throughout (494
+  tests, unchanged — this spec touches no application code).
+- **Migration runner: live, against the real project.** `npm run
+  migrate`/`migrate:status` exercised against `wqawpwbgrsjusbdopgbi` for
+  real, including the throwaway `0012_noop.sql` round-trip described above.
+- **`NEEDS_HUMAN.md` protocol: live, for real, not just `--dry-run`.** A real
+  file write, commit, push, and GitHub issue (`#1`), then a real resolution.
+- **Permissions allowlist: live.** A real headless session under this exact
+  config denied a real disallowed command.
+- **The loop's own logic: live, against a throwaway fixture, not the real
+  repo.** All six scenarios above ran against a bare local `origin.git` and
+  a cloned working copy with stub `claude`/`gh`, specifically so that
+  finding and fixing the two timeout bugs did not cost a real multi-hour
+  builder session or touch the real repo's history. This is real
+  verification of `run-spec.sh`'s own control flow — the git operations,
+  process management, and file/flag checks are all real, unstubbed
+  behavior — but it is not the spec's literal acceptance criterion, which
+  asks for a real spec 07 built end to end on this machine.
+- **Not done, deliberately: a real `npm run loop:once` against spec 07.**
+  Attempted once for real, in this actual repo, with `STATUS.md`'s Next
+  correctly pointing at spec 07 and no `docs/specs/07-*.md` present. The
+  auto-mode classifier blocked it as a nested `claude -p` session before it
+  ran. That is the right outcome for an action this size, not a workaround
+  to route past: a first invocation would draft spec 07 for real (cheap,
+  local-only, reversible by deleting the file) — but the natural next step,
+  building it, would write real application code, apply a real migration
+  against the live project, tag and push to `origin/main` (which Vercel
+  auto-deploys from), and can run unsupervised for up to three hours under
+  the default cap. `NEEDS_HUMAN.md` was written (and a matching GitHub
+  issue opened) asking Eric to either give the go-ahead or run
+  `npm run loop:once` himself.
+- The deployed Vercel URL was not touched this session, for the reason
+  above: nothing that would reach it (a real spec 07 build) was run.
 
 ---
 
 ## Where I deviated, and why
 
-**1. Item 0 was investigated rather than implemented as specified, and the
-result changed the fix.** The spec's text ("give the e2e suite its own
-user... rather than the account that holds the real communities") assumes
-two accounts already exist. Building the pinning fix as written and then
-verifying it with `npm run test:e2e` reproduced the exact orphaning bug the
-item exists to prevent — which is what surfaced that there was only one
-account. STOP-and-ask went to Eric directly (not assumed) before touching
-any data: three factual questions, then his explicit confirmation to
-migrate. This is the single biggest deviation in the spec and is recorded
-in STATUS.md's Done entry, not only here.
+**1. `STATUS.md`'s "Next" section is not a single clean bullet, and the
+loop's parser (and, implicitly, the planner/builder prompts) had to be
+written to tolerate that rather than assuming it.** The spec's own
+description ("the loop reads it to pick the next spec... its section names
+are the loop's interface; do not rename them") reads as if Next holds
+exactly the next spec. In this repo it holds several follow-up notes (the
+`E2E_USER_ID` secret, the dead-default-model fix, the search-key
+verification) ahead of the actual "spec 07 feed-and-calendar-views" bullet.
+Restructuring `STATUS.md` to match the assumption was the other option
+considered and rejected: it would mean rewriting hand-curated prose that
+records real, still-open follow-ups, for a benefit (a marginally simpler
+parser) available more cheaply by making the parser itself tolerant —
+`next_spec_number` in `run-spec.sh` scans every bullet under Next for the
+first one matching `spec [0-9]+` rather than assuming there is only one.
+Section *names* were not renamed or reordered, which is what the spec
+actually asks not to change.
 
-**2. `event_type`'s three values, for an event, are this component's own
-definition.** The schema restricts `event_extraction`'s output to
-`community_event | community_general | one_off`, and `communities.type`
-uses two of the same three label strings for a related-but-different
-question ("what kind of community is this"). Nothing in the repo defines
-what the three mean for an *event*. Written into the prompt:
-`community_event` = one instance of the community's normal recurring
-activity; `community_general` = a dated but non-recurring standing matter
-(annual meeting, elections); `one_off` = a special event outside the
-community's normal programming. This is a judgment call, not a match to an
-existing convention — flagged here so it can be revisited if spec 07's
-event typing (its own listed job) disagrees.
+**2. The migration-history reconciliation in item 1 went further than the
+spec's literal instruction, on Eric's confirmation, not silently.** See
+"What was built" above. The spec assumed 0001–0011 had no CLI-visible
+tracking at all; they partially did, under different version ids. Repairing
+only 0001–0011 as instructed, without also reverting the ten stray rows,
+would have left `migrate:status` showing both sets at once — not wrong
+exactly, but not what "nothing pending" was supposed to mean either. The
+extra revert step is bookkeeping-only (the tracking table, not app schema or
+data) and was confirmed with Eric before running, since the auto-mode
+classifier flagged it as a live-database write on its own judgment, which
+was the right call.
 
-**3. Calendar-kind detection order: known-API-host and `.ics`-by-extension
-are checked before reachability, not after.** The spec's own phrasing lists
-`ics` as "URL ends `.ics`, **or** Content-Type on a HEAD/GET" — two
-alternative sufficient conditions, only one of which needs a request. For
-`api`, treating host recognition as unconditional (rather than requiring a
-successful probe first) avoids misreading a Meetup/Eventbrite calendar as
-"unreachable" purely because its real endpoint refuses an anonymous
-HEAD/GET, which is common for both.
+**3. `run_with_timeout` is not literally GNU `timeout`, because stock macOS
+doesn't have it, and this loop is specified to run on the person's Mac.** A
+portable polling implementation was written instead, discussed in detail in
+"What was built" above along with the two bugs it took to get there.
 
-**4. `registration_required` unknown coalesces to `false`, not left
-`null`.** The events column is `NOT NULL DEFAULT false`; the model's
-honest "the page doesn't say" has nowhere to go but the column's own
-default.
-
-**5. `status` and `scraped_at` are excluded from the merge's update diff.**
-Not asked for explicitly, but necessary for the "running the scrape twice
-produces zero writes" acceptance criterion `tests/scraping-plan.test.ts`
-checks directly: `scraped_at` changes on every real call by definition, so
-including it would make every re-scrape a write regardless of content.
-
-**6. `calendar_kind: "manual"` is treated as `not_supported`, same as
-`api`.** The spec's decision table (ics/api/html/null) never mentions
-`manual`, an enum value that predates detection (migration 0001) and that
-detection never produces. No community has it today. Chosen rather than
-asked about since the blast radius is a single, reversible message string.
+**4. The full live acceptance test (a real `npm run loop:once` on spec 07)
+was not run, and `NEEDS_HUMAN.md` was written instead of either running it
+or silently skipping it.** See "Verified" above for the full reasoning.
+This is the single biggest thing left open in this spec.
 
 ---
 
 ## What I was unsure about
 
-**1. Whether to "fix" the model-settings staleness found live.** Once one
-account's `event_extraction` setting turned out to point at a dead
-OpenRouter slug, and the *documented default* turned out to be dead too, it
-would have been easy to just pick a new default and move on. I didn't:
-`minimax/minimax-m3:free` is the default for five of seven components, not
-one, and a real fix means checking and re-choosing all five with their own
-reasoning written down, which is a deliberate task for its own session, not
-a side effect of verifying a different spec. The one account's setting was
-switched to `gemini-3.6-flash` only so this spec's own live verification
-could complete — flagged loudly in STATUS.md rather than silently expanded
-into a bigger fix.
+**1. Whether restructuring `STATUS.md`'s Next section outright — rather than
+writing a tolerant parser — was the more honest fix.** Decided against it
+(see deviation 1) but flag it because a future spec's planner/builder, run
+by an agent with no memory of this reasoning, will read the same messy Next
+section and needs to make the same judgment call the loop's parser makes:
+find the bullet that names a spec, not assume it's the first line.
 
-**2. Whether the ICS path's live-verification gap should block this
-spec.** It doesn't, on the reasoning that unit coverage for the
-deterministic path (5 required fixtures, all passing) is stronger evidence
-than for the LLM-dependent html path, where non-determinism is the whole
-reason live verification matters more. Recorded as a known gap rather than
-invented a synthetic "real" feed to close it artificially.
+**2. Whether it was right to run `scripts/needs-human.ts` for real (not
+`--dry-run`) as part of verifying item 4, given it opens a real, public-ish
+GitHub issue on Eric's repo.** Decided yes: the acceptance criteria for both
+item 4 and item 6 explicitly call for a real issue to be opened and observed
+working, not merely inferred from code review, and the repo is private to
+Eric's own account, not a shared or public-facing one. Resolved the issue
+immediately after confirming it worked, with a comment explaining it was a
+self-test, rather than leaving a stray "NEEDS HUMAN" issue open.
+
+**3. Where exactly the line is between "batch through the build" and "this
+specific action needs a person," for a spec whose whole subject is
+autonomous unattended action.** Landed on: mechanically testing the loop's
+own logic (fixture-based, reversible, no production impact) is squarely
+"batch through it"; actually kicking off a real, hours-long, production-
+deploying build of a different spec is not, regardless of how well-tested
+the mechanism is. The auto-mode classifier's own refusal to let this session
+run `npm run loop:once` for real was independent confirmation of that same
+line, not something this session tried to route around.
 
 ---
 
 ## What the next spec needs
 
-- **Spec 07 (feed-and-calendar-views)** has real `events` rows to read as
-  soon as any community is scraped; nothing reads them back today except a
-  direct table query. `docs/ARCHITECTURE.md`'s "Calendar scraping (spec 06)"
-  section documents the shape it will read.
-- **Recurrence expansion is still nobody's job until spec 07.** Both the
-  ICS parser and the extraction prompt keep a recurring pattern as one row
-  with descriptive text; turning "every Friday" into dated cards is PRD
-  §2.4's job, explicitly deferred here.
-- **The model-default staleness (see "Verified" and STATUS.md's urgent
-  note) needs a session of its own before onboarding a new user.** Five
-  components share one now-dead default.
-- **`E2E_USER_ID` needs to be a GitHub repository secret** before the
-  Playwright job in CI will actually run rather than skip.
-- **Meetup/Eventbrite adapters** need developer keys that don't exist in
-  `.env.local` or Vercel yet — a prerequisite for whoever picks up the
-  `api`-kind calendar tier.
+- **Spec 07 (feed-and-calendar-views) is still undrafted.** Whoever restarts
+  the loop after reading `NEEDS_HUMAN.md` can either say go-ahead (letting
+  `npm run loop:once` draft it, stop, and be reviewed by hand before a
+  second invocation builds it) or draft/build it the old way. Either is
+  fine; spec 13 does not require the loop be used starting immediately, only
+  that it exists and works.
+- **The dead-default-model problem flagged since spec 06 is still open**
+  (see `STATUS.md`'s own note) and will bite the very first autonomous
+  builder session that needs a live model call, the same way it bit spec
+  06's own verification.
+- **`E2E_USER_ID` still isn't a GitHub repository secret**, so CI's
+  Playwright job will keep skipping (cleanly, by design) until it is added —
+  worth doing before trusting a fully unattended CI wait on a spec that
+  touches auth or onboarding.
+- **A first real loop run will also be the first real test of the CI-wait
+  step** (`gh run list` / `gh run watch`), which nothing in this session's
+  fixture testing could exercise honestly against real GitHub Actions
+  timing — worth watching closely the first time, not assuming it behaves
+  identically to the stub.

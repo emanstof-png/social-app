@@ -109,6 +109,37 @@ pending or stray. From here on, a migration file in a spec is applied by the bui
 
 ## Build loop (spec 13)
 
+**Three agents, three prompts, one job each** (`docs/agents/`). `PLANNER.md`
+reads `STATUS.md`; if Next names a spec with no file under `docs/specs/`, it
+drafts one per `docs/specs/README.md`'s eight sections, commits it untagged,
+and stops — never builds. `BUILDER.md` takes the spec under Next, builds it
+under `CLAUDE.md`'s tier rule, writes `REVIEW.md`, tags `spec-NN` and pushes —
+never drafts the next spec, never starts a second one. `REVIEWER.md` checks
+the tag-to-tag diff against the spec's acceptance criteria, its Medium-tier
+flags and its Out of scope section, and writes `REVIEW-FLAGS.md` with each
+finding labelled `blocking` or `note` — never edits code. Separate sessions
+with no shared context, so a spec exists as a document a person can read
+before any code is written against it, and no session reviews its own work.
+
+**The tier rule** (`CLAUDE.md`) replaces the old per-item "continue"
+checkpoint: a session builds one whole spec, then stops. Low tier (pure
+modules, parsers, prompts, tests, docs) builds straight through. Medium tier
+(server actions and merge logic that write app rows, new migration files)
+proceeds with red-before-green tests, `--dry-run` where one exists, the
+migration applied via `npm run migrate`, and a flag in `REVIEW.md`. High tier
+(data migrations across accounts, secrets, OAuth consent, a dependency beyond
+the stack, a convention deviation, a command the permissions allowlist
+refuses, or anything that would otherwise be a stop-and-ask) writes
+`NEEDS_HUMAN.md` and stops the session.
+
+**`NEEDS_HUMAN.md` protocol** (`scripts/needs-human.ts`). Writes the file at
+the repo root (which spec/item, what is needed, what the session did before
+stopping) and opens a matching GitHub issue titled `NEEDS HUMAN: spec NN item
+M` using `GH_TOKEN` read directly from the environment, so every agent
+produces the same shape and the person gets an email. `--dry-run` prints
+without writing, committing or opening anything. The loop halts while the
+file exists; the person resolves it, deletes the file, commits, and restarts.
+
 **Permissions.** `.claude/settings.json` (committed) is the explicit allowlist an unattended
 `claude -p` session runs under, with `--permission-mode acceptEdits`, never
 `--dangerously-skip-permissions`: `npm run *`, `npx supabase *`, `npx tsx *`, `npx vitest *`,
@@ -117,3 +148,14 @@ explicitly denied — deny always wins over a broader allow), plus `Edit`/`Write
 edits within the repo. Anything the allowlist doesn't cover is not retried: a non-interactive
 session has no one to answer a permission prompt, so an uncovered command simply fails, which
 is exactly the High-tier stop `CLAUDE.md`'s tier rule calls for.
+
+**The loop** (`scripts/run-spec.sh`, `npm run loop` / `loop:once`). One iteration: halt if
+`NEEDS_HUMAN.md` exists, if `STATUS.md`'s Blocked section has a real bullet (not just its
+placeholder), or if Next names no spec; `git pull --ff-only`; run the planner, then either stop
+(it just drafted a brand-new spec — the review window described above) or continue (the spec
+already existed); run the builder under a wall-clock cap (3 hours by default,
+`BUILDER_TIMEOUT_SECONDS` overridable); wait for CI on the pushed tag via `gh`; run the
+reviewer; halt on any `blocking` line in `REVIEW-FLAGS.md`. Every halt condition ends with
+`NEEDS_HUMAN.md` existing (written by the agent that hit it, or by the loop itself if the
+agent couldn't) and the loop stopped — `npm run loop` repeats only past a clean iteration.
+Logged to `logs/run-spec-YYYYMMDD.log` (gitignored).

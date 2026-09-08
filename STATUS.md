@@ -26,11 +26,10 @@
 - **Action needed from Eric:** add `E2E_USER_ID` as a GitHub repository secret (value in the spec-06 item-0 commit message, or re-run `npm run setup:e2e-user`) — CI's Playwright job skips cleanly without it, same as the other four secrets, but the login/assessment tests need it to run at all.
 - **Real fix still open:** buy OpenRouter credit, or find another confirmed-working free model, for the seven components currently stopgapped onto `gemini-3.6-flash` (see the note above). Until then every component shares one provider, so a bad afternoon on Gemini's free tier affects all of them at once.
 - **Existing accounts' already-seeded `model_settings` rows were not touched by the default-model fix** — only new seeds get `gemini-3.6-flash`. Check `/settings` (or the table directly) for any account onboarded before 2026-09-07 that still carries `minimax/minimax-m3:free` or `z-ai/glm-5.2:free` on a component it actually uses.
-- [FEED] spec 07 feed-and-calendar-views — **draft the spec first**. Spec 06 leaves real `events` rows reachable only by direct table read; nothing renders them. Recurrence expansion into dated instances (PRD §2.4 needs concrete cards) is explicitly spec 06's deferred scope, not spec 07's to assume already done.
 - 12a item 2: assessment test DONE (spec 04 item 6, `e2e/assessment.spec.ts`). Event selection still waits for spec 07. Spec 05 deliberately adds no e2e suite — see its REVIEW.md.
 
 ## In Progress
-- (none)
+- [FEED] spec 07 feed-and-calendar-views — spec drafted (`docs/specs/07-feed-and-calendar-views.md`, no addendum), build started by the loop. Reads spec 06's real `events` rows back as a card feed and a calendar view, expands RRULE occurrences at read time, and writes `selections` rows on select. Stops short of Google Calendar sync (spec 08).
 
 ## Blocked
 - (nothing blocking the next spec)

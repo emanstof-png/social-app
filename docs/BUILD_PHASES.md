@@ -17,7 +17,7 @@ Paste ONE at a time. Each spec file in docs/specs/ has scope, acceptance criteri
 | 11 | weekly-planning-and-invites | PRD §3.5–3.6, §4.4, 4.6 (weekly plan from feed, ongoing discovery job, invite suggestions, group-invite suggestion) | Sonnet | 1–2 |
 
 ## Actual build order so far
-`00 → 01 → 02 → 12a (pulled forward) → 03 → 04 → 05 → 06 → 13 (pulled forward) → 07`. The table above is the plan; this is what was run.
+`00 → 01 → 02 → 12a (pulled forward) → 03 → 04 → 05 → 06 → 13 (pulled forward) → 07 → 03-rework (addendum) → 07-calendar-fields (addendum)`. The table above is the plan; this is what was run.
 
 **Spec 04 was re-drafted before it was built.** The original one-page sketch
 (`04-activities-and-focus.md`, written before specs 01–03 existed) was replaced
@@ -72,6 +72,21 @@ at read time (`lib/feed/occurrences.ts`), never written back as new `events`
 rows. `e2e/feed.spec.ts` (the event-selection half of spec 12a item 2, left
 deferred until this spec existed) found a real bug live, before it ever
 passed: see `STATUS.md`'s Done entry for spec 07.
+
+**Spec 07 calendar/community-fields addendum finished on 2026-09-08 (tag
+`spec-07-calendar-fields`)**, built directly in the manager's own session
+(not the loop), from `docs/specs/07-calendar-and-community-fields-
+addendum.md`, settled at the spec 07 review gate from a live hand-test of
+`/feed` and `/calendar`. All three decisions: `/calendar`'s Upcoming list
+and month grid now show only committed selections (`planned`/`attended`),
+via a new `committedOnly` filter in `lib/feed/occurrences.ts` — `/feed`
+itself is unchanged; a day click in the month grid scrolls/highlights the
+matching Upcoming entry, or, if that day has nothing committed, scrolls to
+the nearest committed day via a new `nearestDay` helper and shows a notice,
+so a click never silently no-ops; `communities` (migration 0014) gains
+`times_visited`/`rating`, both user-owned and manually editable on the
+Community card today, next to `status`. See `STATUS.md`'s Done entry for
+the full verification account.
 
 Next is spec 08 — Google Calendar sync. `selections` rows now exist and
 `gcal_event_id` sits ready and unused on every one of them; spec 07's

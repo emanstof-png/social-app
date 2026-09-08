@@ -13,7 +13,7 @@
 - `assessment_answers` — question_id, question_text, answer, asked_at. Written per answer.
 - `assessments` — generated persona: summary, goals, traits, desired_activities (jsonb), assessment_types_used, generated_at, model_run_id.
 - `activities` — name, rationale, source (assessment | suggested | user), status (active | benched | cut).
-- `communities` — name, activity_id, type (community_event | community_general | one_off_source), website, calendar_url, calendar_kind (ics | html | api | manual), location, cost, discovered_at, status (todo | went_once | returning | cut | archived), user_notes, genre_liked (bool null), focus (bool — "one of my few current communities"), and from spec 05: source_url, evidence (jsonb), discovery_run_id, why_relevant. Discovery writes the facts; the user owns status/focus/user_notes/genre_liked and discovery never writes those. From spec 06: calendar_kind_checked_at (nullable timestamptz) — when calendar-kind detection last ran, so an unreachable calendar is not re-probed on every page load.
+- `communities` — name, activity_id, type (community_event | community_general | one_off_source), website, calendar_url, calendar_kind (ics | html | api | manual), location, cost, discovered_at, status (todo | went_once | returning | cut | archived), user_notes, genre_liked (bool null), focus (bool — "one of my few current communities"), and from spec 05: source_url, evidence (jsonb), discovery_run_id, why_relevant. Discovery writes the facts; the user owns status/focus/user_notes/genre_liked and discovery never writes those. From spec 06: calendar_kind_checked_at (nullable timestamptz) — when calendar-kind detection last ran, so an unreachable calendar is not re-probed on every page load. From the spec 07 calendar/community-fields addendum (migration 0014): times_visited (integer, not null, default 0) and rating (smallint 1-5, nullable) — both user-owned and manually editable on the Community card today; spec 09's evaluation flow will later write them automatically from real attendance.
 - `discovery_runs` — activity_id, location, status (running | complete | failed | empty), rounds_done, searches_used, pages_read, communities_found, empty_rounds, last_error, started_at, finished_at. One row per discovery run; a run advances one round per request, so this is also what makes an interrupted run resumable (spec 05).
 - `search_log` — provider (exa | tavily | serper), query, discovery_run_id, result_count, status, error_kind, error_message, latency_ms. One row per search API call, successful or not, so a fall-through is visible rather than inferred. Separate from `run_log` because a search call has no tokens, no cost and no output schema, and does have a query and a result count (spec 05).
 - `events` — community_id, title, starts_at, ends_at, location, address, cost, event_type (community_event | community_general | one_off), source_url, rsvp_url, recurrence, registration_required, capacity, scraped_at, dedupe_hash (unique).
@@ -111,6 +111,31 @@ set. `/calendar` has no `data.ts` or `actions.ts` of its own: it imports
 since it is a second presentation over the same read and actions, not a
 second read path. Month navigation is a `?month=YYYY-MM` search param, not
 client state.
+
+## Calendar and community fields addendum (spec 07 addendum)
+
+**`/calendar` is committed-only; `/feed` is unchanged.** A live hand-test
+found `/calendar` still showing every scraped event, selected or not, the
+same as `/feed` — a second browse-and-pick surface PRD §2.5 originally
+called for but that does not scale once scraping produces hundreds of
+events. `lib/feed/occurrences.ts`'s `committedOnly` filters
+`loadFeedData`'s cards to `selections.status IN ('planned', 'attended')`
+before grouping; `app/(app)/calendar/page.tsx` applies it to both the
+Upcoming list and the month grid's day markers. `/feed` still reads
+`loadFeedData`'s cards directly, unfiltered.
+
+**Day click scrolls/highlights, never navigates.** Clicking a day in the
+month grid (`app/(app)/calendar/calendar-view.tsx`) scrolls the Upcoming
+list to that day's section if it has a committed entry. If it does not,
+`lib/feed/occurrences.ts`'s `nearestDay` finds the closest committed day and
+the page scrolls there instead, with a notice explaining why — a click
+never silently no-ops.
+
+**`communities.times_visited`/`rating`** (migration 0014) are two more
+user-owned fields, next to `status`/`focus`/`user_notes` on the Community
+card, written independently through the same `updateCommunity` per-field
+patch. Both are manually editable now; spec 09's evaluation flow is what
+will later write them automatically from real attendance.
 
 ## Environment (.env.local and Vercel)
 NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY,

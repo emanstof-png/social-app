@@ -1,0 +1,17 @@
+{
+  "specs": 1,
+  "maxItems": null,
+  "dryRun": false,
+  "push": false,
+  "haltBeforeMigration": true,
+  "timeoutMinutes": 180,
+
+  "_comments": {
+    "specs": "How many specs npm run loop will build in this invocation before stopping on its own, regardless of how each one goes. It still pauses for your go-ahead between every spec even within this budget (see docs/ARCHITECTURE.md's Build loop section) -- this only caps the total so an unattended run cannot silently continue forever. Default 1: build one spec, report, stop.",
+    "maxItems": "A cap on how many of the spec's scope items the builder completes in one session before stopping to check in, even if the spec isn't finished. null = no cap, build the whole spec in one session per CLAUDE.md's one-spec-per-session rule. This is enforced by the builder agent counting its own items (see docs/agents/BUILDER.md), not by code, so treat it as a strong request rather than a hard guarantee. A paused spec stays under STATUS.md's In Progress heading, untagged, and the next loop iteration resumes it.",
+    "dryRun": "If true, the builder still writes real code and real local commits and its tests must go green, but it stops short of tagging spec-NN, moving the spec to Done, or pushing -- the spec stays In Progress so a later non-dry-run pass finishes it for real. No CI wait and no reviewer session, since both assume a finished, tagged spec. Forces push to false and haltBeforeMigration to true regardless of their own settings below, because a migration is a real write against the live Supabase project no matter how this flag is set.",
+    "push": "If true, the loop pushes the builder's commits and spec-NN tag to origin after a successful build, then waits for CI on that tag. If false (the default), everything stays local -- commit and tag exist on this machine only, CI is never triggered, and the reviewer still runs against the local tag. Push it yourself later with 'git push --follow-tags' once you've read REVIEW.md. The builder agent never pushes itself; only scripts/run-spec.sh does, right after a successful build, so this one flag is the single place that decision is made.",
+    "haltBeforeMigration": "If true (the default), a spec that needs a new migration file stops there and writes NEEDS_HUMAN.md instead of running npm run migrate -- you apply it by hand, delete the file, commit, and restart the loop. If false, the builder applies it itself via npm run migrate, per CLAUDE.md's Medium-tier rule, and keeps going. Migrations touch the live Supabase project (wqawpwbgrsjusbdopgbi) directly, which is why this defaults to true even though push and dryRun default to the cautious side too.",
+    "timeoutMinutes": "Wall-clock cap on a single builder session, in minutes. Same knob as the BUILDER_TIMEOUT_SECONDS environment variable from spec 13 (that variable, if set, still wins -- it exists for the spec's own acceptance test, which sets a 60-second cap on a throwaway branch). Default 180 (3 hours), matching spec 13's original hardcoded value."
+  }
+}

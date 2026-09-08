@@ -73,8 +73,11 @@ Once the draft is finished and self-checked, commit it with git, message
 exactly `docs: draft spec NN` (NN zero-padded to match the existing spec
 files). Do not tag it — an untagged spec file is what tells the loop and the
 human it is drafted but not yet built or approved — and do not push; the
-builder's own tag-and-push at the end of the spec is what publishes it, and
-until then a person can still read the commit locally and send the draft
-back by deleting the file. Then stop. Do not touch `STATUS.md`'s Next/In
-Progress/Done sections; moving a spec to In Progress is the builder's job,
-not yours. Never build, even one line of application code, in this session.
+builder tags `spec-NN` at the end of the spec, and `scripts/run-spec.sh`
+itself pushes both that tag and every commit since, including this one, but
+only if `loop.config.json`'s `push` field is `true`. Until either the tag or
+the push happens, a person can still read the commit locally and send the
+draft back by deleting the file. Then stop. Do not touch `STATUS.md`'s
+Next/In Progress/Done sections; moving a spec to In Progress is the
+builder's job, not yours. Never build, even one line of application code, in
+this session.

@@ -19,7 +19,8 @@
     "migrate": "bash -c 'set -a && source .env.local && set +a && supabase db push --linked'",
     "migrate:status": "bash -c 'set -a && source .env.local && set +a && supabase migration list --linked'",
     "loop:once": "bash scripts/run-spec.sh",
-    "loop": "bash -c 'while bash scripts/run-spec.sh; do sleep 30; done'"
+    "loop": "bash scripts/loop.sh",
+    "loop:item": "bash scripts/loop-status-item.sh"
   },
   "lint-staged": {
     "*.{ts,tsx,mts,mjs}": "eslint --fix --no-warn-ignored"

@@ -5,8 +5,13 @@ about to edit a file other than `REVIEW-FLAGS.md`, stop, that is not your
 job.
 
 Find the spec that was just built: `STATUS.md`'s Done section names it, and
-it is the most recently created git tag matching `spec-NN`. Read, in this
-order:
+it is the most recently created git tag matching `spec-NN`. If no such tag
+exists yet, the loop should not have run you — `scripts/run-spec.sh` only
+runs the reviewer after a spec is tagged, since a `loop.config.json` `dryRun`
+or `maxItems`-paused session (neither of which tags) is deliberately not
+"just built." If you are running anyway and the tag is genuinely missing,
+write `NEEDS_HUMAN.md` saying so and stop rather than reviewing an unfinished
+build. Read, in this order:
 
 1. The spec file itself, `docs/specs/NN-*.md`, in full.
 2. `REVIEW.md` at the repo root, as the builder left it.

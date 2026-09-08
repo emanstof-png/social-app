@@ -1,20 +1,29 @@
 #!/usr/bin/env bash
 #
-# The autonomous build loop (spec 13 item 6). Halt-condition check, git pull,
-# planner, then EITHER stop (if the planner just drafted a brand-new spec --
-# a person gets a window to read and, by deleting the tag-less file, reject
-# the draft before any code is written against it) OR build it end to end
-# (if the spec file already existed, so the planner was a no-op): builder
-# under a wall-clock cap, wait for CI on the pushed tag, reviewer. Any halt
-# condition writes NEEDS_HUMAN.md (if the agent that hit it didn't already)
-# and stops.
+# One iteration of the autonomous build loop (spec 13 item 6, dials added
+# afterward -- see loop.config.json and docs/ARCHITECTURE.md's Build loop
+# section). Halt-condition check, git pull, planner, then EITHER stop (if the
+# planner just drafted a brand-new spec -- a person gets a window to read and,
+# by deleting the tag-less file, reject the draft before any code is written
+# against it) OR build it end to end (if the spec file already existed, so the
+# planner was a no-op): builder under a wall-clock cap, then, only if
+# loop.config.json's push is true, push and wait for CI on the pushed tag,
+# then the reviewer. Any halt condition writes NEEDS_HUMAN.md (if the agent
+# that hit it didn't already) and stops.
 #
-#   npm run loop          -- runs forever, one spec after another
-#   npm run loop:once     -- runs exactly one iteration and exits (how this is tested)
+#   npm run loop          -- the supervised entrypoint: plan, confirm, N specs
+#                             with a pause between each (scripts/loop.sh)
+#   npm run loop:once     -- runs exactly this one iteration and exits, no
+#                             confirmation prompt (how this is tested)
 #
-# BUILDER_TIMEOUT_SECONDS overrides the 3-hour wall-clock cap (default 10800),
-# used by the spec's own acceptance test: a 60-second cap on a throwaway
-# branch to prove the timeout path writes NEEDS_HUMAN.md.
+# Every dial (specs, maxItems, dryRun, push, haltBeforeMigration,
+# timeoutMinutes) comes from loop.config.json, overridable by the same CLI
+# flags scripts/loop-config.ts accepts, e.g.:
+#   bash scripts/run-spec.sh --push --timeout-minutes 60
+#
+# BUILDER_TIMEOUT_SECONDS, if set in the environment, overrides timeoutMinutes
+# entirely -- used by spec 13's own acceptance test, a 60-second cap on a
+# throwaway branch proving the timeout path writes NEEDS_HUMAN.md.
 set -euo pipefail
 
 # Job control on, so each backgrounded job below gets its own process group
@@ -27,8 +36,13 @@ set -euo pipefail
 set -m
 
 cd "$(git rev-parse --show-toplevel)"
+# shellcheck source=scripts/loop-lib.sh
+source scripts/loop-lib.sh
 
-BUILDER_TIMEOUT_SECONDS="${BUILDER_TIMEOUT_SECONDS:-10800}"
+LOOP_STARTED_AT="$(date +%s)"
+load_loop_config "$@"
+
+BUILDER_TIMEOUT_SECONDS="${BUILDER_TIMEOUT_SECONDS:-$((LOOP_TIMEOUT_MINUTES * 60))}"
 LOG_DIR="logs"
 mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/run-spec-$(date -u +%Y%m%d).log"
@@ -38,6 +52,7 @@ log() {
 }
 
 halt() {
+  write_loop_status "${spec_num:-}" "" "" "(loop halted)" "$*"
   log "HALT: $*"
   exit 1
 }
@@ -86,25 +101,6 @@ run_with_timeout() {
   return "$status"
 }
 
-# Finds the first bullet under STATUS.md's "## Next" heading that names a
-# spec by number ("spec 07", "[FEED] spec 07 ...") and prints just the
-# number. STATUS.md's Next section can (and does) also carry unrelated
-# follow-up notes above that bullet; this skips those rather than assuming
-# Next holds exactly one line.
-next_spec_number() {
-  awk '/^## Next$/{flag=1; next} /^## /{flag=0} flag' STATUS.md \
-    | grep -iE '^- .*\bspec[[:space:]]+[0-9]+' \
-    | head -1 \
-    | grep -oiE 'spec[[:space:]]+[0-9]+' \
-    | head -1 \
-    | grep -oE '[0-9]+'
-}
-
-blocked_bullets() {
-  awk '/^## Blocked$/{flag=1; next} /^## /{flag=0} flag && /^- /{print}' STATUS.md \
-    | grep -v '(nothing blocking' || true
-}
-
 run_claude() {
   # $1 = prompt file, rest = extra args. Appends to $LOG_FILE via redirection,
   # not `| tee`: run_with_timeout's own backgrounding depends on nothing else
@@ -116,7 +112,7 @@ run_claude() {
   claude -p "$(cat "$prompt_file")" --permission-mode acceptEdits "$@" >> "$LOG_FILE" 2>&1
 }
 
-log "=== run-spec.sh: starting one iteration ==="
+log "=== run-spec.sh: starting one iteration (push=$LOOP_PUSH dryRun=$LOOP_DRY_RUN maxItems=${LOOP_MAX_ITEMS:-none} haltBeforeMigration=$LOOP_HALT_BEFORE_MIGRATION timeout=${BUILDER_TIMEOUT_SECONDS}s) ==="
 
 # Step 1: halt conditions, checked against STATUS.md as it stands before pull.
 if [ -f NEEDS_HUMAN.md ]; then
@@ -130,9 +126,10 @@ fi
 
 spec_num="$(next_spec_number || true)"
 if [ -z "$spec_num" ]; then
-  halt "STATUS.md's Next section names no spec. Nothing to build."
+  halt "STATUS.md names no spec in In Progress or Next. Nothing to build."
 fi
-log "Next spec: $spec_num"
+log "Spec: $spec_num"
+write_loop_status "$spec_num" "" "starting" "checking halt conditions and pulling" ""
 
 # Whether spec $spec_num already had a drafted file BEFORE this iteration's
 # planner runs. If it didn't, the planner is about to create it -- and this
@@ -154,6 +151,7 @@ git pull --ff-only >> "$LOG_FILE" 2>&1
 
 # Step 3: planner. Drafts spec $spec_num if it doesn't exist yet; a no-op if it does.
 log "Running the planner for spec $spec_num"
+write_loop_status "$spec_num" "" "planner" "drafting spec if needed" ""
 set +e
 run_claude docs/agents/PLANNER.md
 planner_status=$?
@@ -177,12 +175,18 @@ if ! compgen -G "docs/specs/${spec_num}-*.md" > /dev/null 2>&1; then
 fi
 
 if [ "$spec_existed_before_planning" = false ]; then
+  write_loop_status "$spec_num" "" "(none)" "waiting for a person to read the new spec draft" ""
   log "=== spec $spec_num drafted this iteration. Stopping before building anything. ==="
   exit 0
 fi
 
-# Step 4: builder, under the wall-clock cap.
+# Step 4: builder, under the wall-clock cap. loop.config.json (LOOP_MAX_ITEMS,
+# LOOP_DRY_RUN, LOOP_HALT_BEFORE_MIGRATION) is read by the builder agent
+# itself from the file directly -- see docs/agents/BUILDER.md -- since only it
+# has the scope-item-level and migration-file-level granularity to act on
+# them; this script cannot see inside that session's own progress.
 log "Running the builder for spec $spec_num (cap: ${BUILDER_TIMEOUT_SECONDS}s)"
+write_loop_status "$spec_num" "" "builder" "building under the tier rule (cap ${BUILDER_TIMEOUT_SECONDS}s)" ""
 set +e
 run_with_timeout "$BUILDER_TIMEOUT_SECONDS" bash -c "claude -p \"\$(cat docs/agents/BUILDER.md)\" --permission-mode acceptEdits" >> "$LOG_FILE" 2>&1
 builder_status=$?
@@ -205,46 +209,75 @@ elif [ "$builder_status" -ne 0 ]; then
 fi
 
 if ! git rev-parse "spec-$spec_num" > /dev/null 2>&1; then
-  npm run needs-human -- --spec "$spec_num" \
-    --needed "The builder exited cleanly but tag spec-$spec_num does not exist. Check $LOG_FILE and finish or retag by hand." \
-    --did "Builder session for spec $spec_num exited 0 but never created its tag." >> "$LOG_FILE" 2>&1
-  halt "No tag spec-$spec_num after the builder ran."
-fi
-
-# Step 5: wait for CI on the pushed tag.
-log "Waiting for CI on spec-$spec_num"
-sha="$(git rev-parse "spec-$spec_num")"
-run_id=""
-for _ in $(seq 1 30); do
-  run_id="$(gh run list --commit "$sha" --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)"
-  if [ -n "$run_id" ] && [ "$run_id" != "null" ]; then
-    break
+  # Not necessarily a problem: the builder deliberately withholds the tag
+  # (and leaves the spec under STATUS.md's In Progress heading) when
+  # loop.config.json's maxItems cap is reached mid-spec, or when dryRun is
+  # true -- in both cases the spec is meant to be picked up again by a later
+  # iteration, not treated as a stuck build.
+  if awk '/^## In Progress$/{flag=1; next} /^## /{flag=0} flag' STATUS.md \
+      | grep -qiE "^- .*\bspec[[:space:]]+${spec_num}\b"; then
+    write_loop_status "$spec_num" "" "(none)" "spec $spec_num paused (maxItems cap or dryRun) -- still In Progress, no tag yet" ""
+    log "=== spec $spec_num paused mid-build, no tag yet (maxItems cap or dryRun). Still In Progress; the next iteration resumes it. ==="
+    exit 0
   fi
-  sleep 10
-done
 
-if [ -z "$run_id" ] || [ "$run_id" = "null" ]; then
   npm run needs-human -- --spec "$spec_num" \
-    --needed "Check GitHub Actions for the run against commit $sha (tag spec-$spec_num) and confirm CI status by hand." \
-    --did "No CI run was found for commit $sha within 5 minutes of the push." >> "$LOG_FILE" 2>&1
-  halt "No CI run found for spec-$spec_num (commit $sha)."
+    --needed "The builder exited cleanly but tag spec-$spec_num does not exist, and STATUS.md no longer lists it under In Progress either. Check $LOG_FILE and finish or retag by hand." \
+    --did "Builder session for spec $spec_num exited 0 but never created its tag." >> "$LOG_FILE" 2>&1
+  halt "No tag spec-$spec_num after the builder ran, and spec $spec_num is not under STATUS.md's In Progress."
 fi
 
-log "CI run $run_id -- watching"
-set +e
-gh run watch "$run_id" --exit-status >> "$LOG_FILE" 2>&1
-ci_status=$?
-set -e
+# Step 4b: push, deterministically, gated on loop.config.json's push field --
+# never left to the builder agent to decide, so this one flag is the single
+# place that call is made. dryRun forces push to false in loop-config.ts, so
+# it never reaches here (dryRun's builder never tags in the first place).
+if [ "$LOOP_PUSH" = "true" ]; then
+  log "Pushing branch and tag spec-$spec_num (push=true)"
+  write_loop_status "$spec_num" "" "(loop)" "pushing branch and tag spec-$spec_num" ""
+  git push >> "$LOG_FILE" 2>&1
+  git push origin "spec-$spec_num" >> "$LOG_FILE" 2>&1
+else
+  log "push=false: spec-$spec_num stays local. Run 'git push --follow-tags' by hand when ready; skipping the CI wait."
+fi
 
-if [ "$ci_status" -ne 0 ]; then
-  npm run needs-human -- --spec "$spec_num" \
-    --needed "Read the failing CI run (https://github.com/$(git remote get-url origin | sed -E 's#.*github\.com[:/]##; s#\.git$##')/actions/runs/$run_id) and fix or revert." \
-    --did "CI run $run_id for spec-$spec_num (commit $sha) finished red." >> "$LOG_FILE" 2>&1
-  halt "CI failed for spec-$spec_num (run $run_id)."
+# Step 5: wait for CI on the pushed tag -- only meaningful once it's pushed.
+if [ "$LOOP_PUSH" = "true" ]; then
+  log "Waiting for CI on spec-$spec_num"
+  write_loop_status "$spec_num" "" "(loop)" "waiting for CI on spec-$spec_num" ""
+  sha="$(git rev-parse "spec-$spec_num")"
+  run_id=""
+  for _ in $(seq 1 30); do
+    run_id="$(gh run list --commit "$sha" --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)"
+    if [ -n "$run_id" ] && [ "$run_id" != "null" ]; then
+      break
+    fi
+    sleep 10
+  done
+
+  if [ -z "$run_id" ] || [ "$run_id" = "null" ]; then
+    npm run needs-human -- --spec "$spec_num" \
+      --needed "Check GitHub Actions for the run against commit $sha (tag spec-$spec_num) and confirm CI status by hand." \
+      --did "No CI run was found for commit $sha within 5 minutes of the push." >> "$LOG_FILE" 2>&1
+    halt "No CI run found for spec-$spec_num (commit $sha)."
+  fi
+
+  log "CI run $run_id -- watching"
+  set +e
+  gh run watch "$run_id" --exit-status >> "$LOG_FILE" 2>&1
+  ci_status=$?
+  set -e
+
+  if [ "$ci_status" -ne 0 ]; then
+    npm run needs-human -- --spec "$spec_num" \
+      --needed "Read the failing CI run (https://github.com/$(git remote get-url origin | sed -E 's#.*github\.com[:/]##; s#\.git$##')/actions/runs/$run_id) and fix or revert." \
+      --did "CI run $run_id for spec-$spec_num (commit $sha) finished red." >> "$LOG_FILE" 2>&1
+    halt "CI failed for spec-$spec_num (run $run_id)."
+  fi
 fi
 
 # Step 6: reviewer.
 log "Running the reviewer for spec $spec_num"
+write_loop_status "$spec_num" "" "reviewer" "checking acceptance criteria and Medium-tier flags" ""
 set +e
 run_claude docs/agents/REVIEWER.md
 reviewer_status=$?
@@ -264,4 +297,5 @@ if grep -qi '^blocking:' REVIEW-FLAGS.md; then
   halt "Reviewer found a blocking issue in spec $spec_num. See REVIEW-FLAGS.md."
 fi
 
+write_loop_status "$spec_num" "" "(none)" "spec $spec_num built and reviewed clean -- npm run loop will pause for your go-ahead before the next spec" ""
 log "=== spec $spec_num built, reviewed, no blocking flags ==="

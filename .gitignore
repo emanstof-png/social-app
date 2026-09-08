@@ -46,3 +46,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 logs/
+
+# build loop live status (spec 13 dials addendum) -- rewritten every step,
+# not a record; REVIEW.md and STATUS.md are the record
+LOOP-STATUS.md

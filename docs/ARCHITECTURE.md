@@ -112,9 +112,10 @@ pending or stray. From here on, a migration file in a spec is applied by the bui
 **Three agents, three prompts, one job each** (`docs/agents/`). `PLANNER.md`
 reads `STATUS.md`; if Next names a spec with no file under `docs/specs/`, it
 drafts one per `docs/specs/README.md`'s eight sections, commits it untagged,
-and stops — never builds. `BUILDER.md` takes the spec under Next, builds it
-under `CLAUDE.md`'s tier rule, writes `REVIEW.md`, tags `spec-NN` and pushes —
-never drafts the next spec, never starts a second one. `REVIEWER.md` checks
+and stops — never builds. `BUILDER.md` takes the spec under Next (or a paused
+one already In Progress), builds it under `CLAUDE.md`'s tier rule, writes
+`REVIEW.md` and tags `spec-NN` (never pushes — the loop does that, see Runtime
+dials below) — never drafts the next spec, never starts a second one. `REVIEWER.md` checks
 the tag-to-tag diff against the spec's acceptance criteria, its Medium-tier
 flags and its Out of scope section, and writes `REVIEW-FLAGS.md` with each
 finding labelled `blocking` or `note` — never edits code. Separate sessions
@@ -151,11 +152,72 @@ is exactly the High-tier stop `CLAUDE.md`'s tier rule calls for.
 
 **The loop** (`scripts/run-spec.sh`, `npm run loop` / `loop:once`). One iteration: halt if
 `NEEDS_HUMAN.md` exists, if `STATUS.md`'s Blocked section has a real bullet (not just its
-placeholder), or if Next names no spec; `git pull --ff-only`; run the planner, then either stop
-(it just drafted a brand-new spec — the review window described above) or continue (the spec
-already existed); run the builder under a wall-clock cap (3 hours by default,
-`BUILDER_TIMEOUT_SECONDS` overridable); wait for CI on the pushed tag via `gh`; run the
-reviewer; halt on any `blocking` line in `REVIEW-FLAGS.md`. Every halt condition ends with
-`NEEDS_HUMAN.md` existing (written by the agent that hit it, or by the loop itself if the
-agent couldn't) and the loop stopped — `npm run loop` repeats only past a clean iteration.
-Logged to `logs/run-spec-YYYYMMDD.log` (gitignored).
+placeholder), or if neither In Progress nor Next names a spec; `git pull --ff-only`; run the
+planner, then either stop (it just drafted a brand-new spec — the review window described
+above) or continue (the spec already existed); run the builder under a wall-clock cap; push and
+wait for CI on the pushed tag via `gh`, but only if `push` is enabled (below); run the reviewer;
+halt on any `blocking` line in `REVIEW-FLAGS.md`. Every halt condition ends with
+`NEEDS_HUMAN.md` existing (written by the agent that hit it, or by the loop itself if the agent
+couldn't) and the loop stopped. Logged to `logs/run-spec-YYYYMMDD.log` (gitignored).
+
+A spec already under STATUS.md's In Progress heading — paused mid-build by the `maxItems` cap
+or `dryRun` below, or left there by a halt a person just resolved — takes priority over Next, so
+the loop always finishes what it started before picking up something new
+(`next_spec_number`/`next_spec_bullet` in `scripts/loop-lib.sh`, shared by both entrypoints).
+
+**Runtime dials** (`loop.config.json`, committed at the repo root, one field per line with its
+own reasoning in a sibling `_comments` object since JSON has no real comments). Resolved by
+`scripts/loop-config.ts` — defaults, then the file, then CLI flags of the same name
+(`--specs`, `--max-items`, `--dry-run`/`--no-dry-run`, `--push`/`--no-push`,
+`--halt-before-migration`/`--no-halt-before-migration`, `--timeout-minutes`) — and exposed to
+both bash entrypoints as `LOOP_*` shell variables via `load_loop_config` in `scripts/loop-lib.sh`.
+A `tests/loop-config.test.ts` suite covers the merge precedence and dryRun's forced overrides.
+
+- **`specs`** (default `1`): how many specs one `npm run loop` invocation builds before it stops
+  on its own, regardless of how each one goes. Enforced by `scripts/loop.sh`'s own iteration
+  count — `scripts/run-spec.sh` itself only ever runs one iteration and knows nothing about this
+  field.
+- **`maxItems`** (default `null`): a cap on scope items per builder session. Enforced by the
+  builder agent counting its own items (`docs/agents/BUILDER.md`) and reporting progress via
+  `npm run loop:item -- "item N of M: ..."` (`scripts/loop-status-item.sh`, which only ever
+  rewrites `LOOP-STATUS.md`'s "Current item" line, so a careless freehand edit from inside that
+  session can't corrupt the rest of the file) — a soft limit the agent is instructed to respect,
+  not one `run-spec.sh` can check itself. A session that stops at the cap commits what it has and
+  leaves the spec under STATUS.md's In Progress heading, untagged; `run-spec.sh` recognizes that
+  shape (no `spec-NN` tag, but still listed under In Progress) as a scheduled pause rather than a
+  stuck build, and exits `0` without running the CI wait or the reviewer.
+- **`dryRun`** (default `false`): the builder still writes real code, real local commits, and
+  its tests must go green, but withholds the `spec-NN` tag and the STATUS.md Done move — same
+  paused shape as `maxItems` above, for the same reason (nothing is finished yet). Forces `push`
+  to `false` and `haltBeforeMigration` to `true` inside `mergeLoopConfig`, regardless of what
+  those two fields themselves say, because a migration applied for real is a write against the
+  live Supabase project no matter what this run is labelled.
+- **`push`** (default `false`): whether `scripts/run-spec.sh` pushes the builder's commits and
+  `spec-NN` tag to origin and waits on CI. The builder agent never pushes itself — see the note
+  in `docs/agents/BUILDER.md` — so this one field, read only by `run-spec.sh`, is the single
+  place that decision is made. `false` leaves everything local; push it yourself with
+  `git push --follow-tags` once you've read `REVIEW.md`. The reviewer still runs against the
+  local tag either way.
+- **`haltBeforeMigration`** (default `true`): a spec needing a new migration file writes
+  `NEEDS_HUMAN.md` instead of the builder running `npm run migrate` itself. `false` restores the
+  original spec 13 behavior (apply automatically, per CLAUDE.md's Medium-tier rule).
+- **`timeoutMinutes`** (default `180`): the builder's wall-clock cap, in minutes — same knob as
+  the `BUILDER_TIMEOUT_SECONDS` environment variable from spec 13, which still wins over this
+  field when set (needed for spec 13's own acceptance test, a 60-second cap on a throwaway
+  branch).
+
+**The supervised entrypoint** (`scripts/loop.sh`, `npm run loop`). Never starts an agent on its
+own: resolves the dials above, prints the plan in full (next spec, every dial's value and effect,
+what will and won't run) and waits for a `y` before `scripts/run-spec.sh` runs its first agent.
+After every iteration it prints a short report (the halt / `REVIEW-FLAGS.md` / paused-spec
+outcome and the last commit) and, if more specs remain in the `specs` budget, waits for another
+confirmation before continuing. `npm run loop:once` is `scripts/run-spec.sh` directly — exactly
+one iteration, no plan, no confirmation, no pause — kept exactly that way on purpose, since it is
+the form spec 13's own acceptance test drives non-interactively.
+
+**Live status** (`LOOP-STATUS.md`, gitignored, rewritten in full at every step by both
+entrypoints via `write_loop_status` in `scripts/loop-lib.sh`): current spec, current item (as
+last reported by the builder), which agent is running, elapsed time this run, the last commit,
+the next action, and the halt reason once one exists. Meant to be watched in an editor while the
+loop runs — it is a live view, not a record, which is why it isn't committed; `REVIEW.md` and
+`STATUS.md` stay the durable account of what actually happened.

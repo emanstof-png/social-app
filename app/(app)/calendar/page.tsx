@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { dayKeyIn, monthGrid } from "@/lib/feed/occurrences";
+import { committedOnly, dayKeyIn, groupByDay, monthGrid } from "@/lib/feed/occurrences";
 import { hasSelectedActivities } from "@/lib/onboarding";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { loadFeedData, readProfileForFeed } from "../feed/data";
@@ -60,9 +60,14 @@ export default async function CalendarPage({
     return <ErrorPanel cause={cause} />;
   }
 
+  // Committed only (spec 07 addendum: calendar-and-community-fields,
+  // decision 1) -- /calendar shows "what am I attending," not another
+  // browse-and-pick list. /feed stays unfiltered.
+  const committedByDay = groupByDay(committedOnly(data.cards), profile.timezone);
+
   // The set groupByDay already produced -- the grid never recomputes what
   // counts as "has an event."
-  const hasEventsOn = new Set(data.byDay.map((group) => group.day));
+  const hasEventsOn = new Set(committedByDay.map((group) => group.day));
   const grid = monthGrid(year, month, hasEventsOn);
 
   return (
@@ -70,7 +75,7 @@ export default async function CalendarPage({
       year={year}
       month={month}
       grid={grid}
-      byDay={data.byDay}
+      byDay={committedByDay}
       timezone={profile.timezone}
     />
   );

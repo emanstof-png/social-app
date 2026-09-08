@@ -309,6 +309,22 @@ export function groupByDay<T extends { startsAt: string }>(
   return groups;
 }
 
+/**
+ * Only cards whose selection is committed (`planned` or `attended`) --
+ * what /calendar shows, versus /feed's unfiltered set (spec 07 addendum:
+ * calendar-and-community-fields, decision 1). A narrower filter on the same
+ * join loadFeedData already produces, not a new query shape.
+ */
+export function committedOnly<T extends { selection: { status: string } | null }>(
+  items: T[],
+): T[] {
+  return items.filter(
+    (item) =>
+      item.selection !== null &&
+      (item.selection.status === "planned" || item.selection.status === "attended"),
+  );
+}
+
 export type CalendarDay = { date: string; inMonth: boolean; hasEvents: boolean };
 
 function dayKey(date: Date): string {
@@ -356,4 +372,34 @@ export function monthGrid(
   }
 
   return weeks;
+}
+
+/**
+ * The entry in `byDay` closest in calendar days to `target` ("YYYY-MM-DD"),
+ * ties broken toward the earlier day. Null if `byDay` is empty.
+ *
+ * Powers the Calendar's day-click behavior when the clicked day has nothing
+ * committed: "scroll to where it would be (nearest date)... do not silently
+ * no-op" (spec 07 addendum: calendar-and-community-fields, decision 2).
+ */
+export function nearestDay<T extends { day: string }>(
+  byDay: readonly T[],
+  target: string,
+): T | null {
+  if (byDay.length === 0) return null;
+
+  const targetMs = Date.parse(`${target}T00:00:00Z`);
+
+  let best = byDay[0];
+  let bestDiff = Math.abs(Date.parse(`${best.day}T00:00:00Z`) - targetMs);
+
+  for (const entry of byDay.slice(1)) {
+    const diff = Math.abs(Date.parse(`${entry.day}T00:00:00Z`) - targetMs);
+    if (diff < bestDiff || (diff === bestDiff && entry.day < best.day)) {
+      best = entry;
+      bestDiff = diff;
+    }
+  }
+
+  return best;
 }

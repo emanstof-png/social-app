@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  committedOnly,
   expandOccurrences,
   groupByDay,
   monthGrid,
+  nearestDay,
   parseRrule,
 } from "../lib/feed/occurrences";
 import { MAX_OCCURRENCES_PER_EVENT } from "../lib/feed/budget";
@@ -229,5 +231,44 @@ describe("monthGrid", () => {
     // hasEventsOn beyond this month's own grid days does not leak in.
     const unrelated = flat.find((day) => day.date === "2026-09-09");
     expect(unrelated?.hasEvents).toBe(false);
+  });
+});
+
+describe("committedOnly", () => {
+  it("keeps planned and attended, drops skipped and unselected", () => {
+    const cards = [
+      { id: "a", selection: { status: "planned" } },
+      { id: "b", selection: { status: "attended" } },
+      { id: "c", selection: { status: "skipped" } },
+      { id: "d", selection: null },
+    ];
+    expect(committedOnly(cards).map((c) => c.id)).toEqual(["a", "b"]);
+  });
+
+  it("returns an empty array when nothing is committed", () => {
+    expect(committedOnly([{ selection: null }])).toEqual([]);
+  });
+});
+
+describe("nearestDay", () => {
+  const byDay = [{ day: "2026-09-05" }, { day: "2026-09-10" }, { day: "2026-09-20" }];
+
+  it("returns the exact match when the target day is present", () => {
+    expect(nearestDay(byDay, "2026-09-10")).toEqual({ day: "2026-09-10" });
+  });
+
+  it("returns the closest day when the target has nothing", () => {
+    expect(nearestDay(byDay, "2026-09-08")).toEqual({ day: "2026-09-10" });
+    expect(nearestDay(byDay, "2026-09-01")).toEqual({ day: "2026-09-05" });
+  });
+
+  it("breaks a tie toward the earlier day", () => {
+    // 09-07 is 2 days from both 09-05 and 09-09... use a symmetric pair.
+    const tied = [{ day: "2026-09-05" }, { day: "2026-09-15" }];
+    expect(nearestDay(tied, "2026-09-10")).toEqual({ day: "2026-09-05" });
+  });
+
+  it("returns null for an empty list", () => {
+    expect(nearestDay([], "2026-09-08")).toBeNull();
   });
 });

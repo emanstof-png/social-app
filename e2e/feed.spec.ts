@@ -426,7 +426,7 @@ test.describe("feed", () => {
     // revalidatePath("/calendar") would actually leave stale.
     await page.getByRole("link", { name: "Calendar" }).click();
     await expect(page).toHaveURL(/\/calendar/);
-    await page.getByRole("link", { name: "Feed" }).click();
+    await page.getByRole("link", { name: "Feed", exact: true }).click();
     await expect(page).toHaveURL(/\/feed/);
 
     await expect(page.getByText(FIXTURE_TITLE)).toBeVisible({ timeout: 20_000 });
@@ -448,10 +448,14 @@ test.describe("feed", () => {
     const calRow = calTitle.locator("xpath=../..");
     await expect(calRow.getByRole("button", { name: "Added" })).toBeVisible({ timeout: 10_000 });
 
+    // /calendar is committed-only (spec 07 addendum: calendar-and-community-
+    // fields, decision 1) -- unselecting here removes the entry from the
+    // list entirely rather than toggling it back to a "Select" state in
+    // place, since it no longer has a committed selection to show.
     await calRow.getByRole("button", { name: "Added" }).click();
-    await expect(calRow.getByRole("button", { name: "Select" })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText(FIXTURE_TITLE)).toHaveCount(0, { timeout: 10_000 });
 
-    await page.getByRole("link", { name: "Feed" }).click();
+    await page.getByRole("link", { name: "Feed", exact: true }).click();
     await expect(page).toHaveURL(/\/feed/);
     await expect(feedCard.getByRole("button", { name: "Select" })).toBeVisible({
       timeout: 10_000,
@@ -467,5 +471,59 @@ test.describe("feed", () => {
     // lib/feed/ functions tests/feed-occurrences.test.ts already covers.
     await expect(page.getByText(FIXTURE_CUT_TITLE)).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText(FIXTURE_ARCHIVED_TITLE)).toHaveCount(0);
+  });
+
+  test("an unselected event shows on /feed but not /calendar; selecting it makes it appear on /calendar too (spec 07 addendum: calendar-and-community-fields)", async ({
+    page,
+  }) => {
+    await expect(page.getByText(FIXTURE_TITLE)).toBeVisible({ timeout: 20_000 });
+
+    await page.getByRole("link", { name: "Calendar" }).click();
+    await expect(page).toHaveURL(/\/calendar/);
+    // committedOnly (lib/feed/occurrences.ts) against a real join, not just
+    // the pure-function coverage in tests/feed-occurrences.test.ts.
+    await expect(page.getByText(FIXTURE_TITLE)).toHaveCount(0);
+
+    await page.getByRole("link", { name: "Feed", exact: true }).click();
+    await expect(page).toHaveURL(/\/feed/);
+    const card = page.locator("article", { hasText: FIXTURE_TITLE });
+    await card.getByRole("button", { name: "Select" }).click();
+    await expect(card.getByRole("button", { name: "Added" })).toBeVisible({ timeout: 10_000 });
+
+    await page.getByRole("link", { name: "Calendar" }).click();
+    await expect(page).toHaveURL(/\/calendar/);
+    await expect(page.getByText(FIXTURE_TITLE)).toBeVisible({ timeout: 10_000 });
+  });
+
+  test("clicking a day on /calendar scrolls to it when committed, or to the nearest committed day when not -- it never silently no-ops (spec 07 addendum: calendar-and-community-fields)", async ({
+    page,
+  }) => {
+    await expect(page.getByText(FIXTURE_TITLE)).toBeVisible({ timeout: 20_000 });
+    const feedCard = page.locator("article", { hasText: FIXTURE_TITLE });
+    await feedCard.getByRole("button", { name: "Select" }).click();
+    await expect(feedCard.getByRole("button", { name: "Added" })).toBeVisible({ timeout: 10_000 });
+
+    await page.getByRole("link", { name: "Calendar" }).click();
+    await expect(page).toHaveURL(/\/calendar/);
+    await expect(page.getByText(FIXTURE_TITLE)).toBeVisible({ timeout: 10_000 });
+
+    const committedSectionId = await page
+      .locator("section", { hasText: FIXTURE_TITLE })
+      .first()
+      .getAttribute("id");
+    if (!committedSectionId) throw new Error("Could not find the fixture's Upcoming section id.");
+    const committedDate = committedSectionId.replace("day-", "");
+
+    // Exact match: clicking the fixture's own day scrolls it into view, no notice.
+    await page.getByRole("button", { name: `Day ${committedDate}` }).click();
+    await expect(page.locator(`#${committedSectionId}`)).toBeInViewport();
+    await expect(page.getByRole("status")).toHaveCount(0);
+
+    // The fixture is seeded a week out, so "today" has nothing committed --
+    // the click must still produce something, not a no-op.
+    const todayKey = new Date().toISOString().slice(0, 10);
+    await page.getByRole("button", { name: `Day ${todayKey}` }).click();
+    await expect(page.getByRole("status")).toContainText("Nothing committed");
+    await expect(page.locator(`#${committedSectionId}`)).toBeInViewport();
   });
 });

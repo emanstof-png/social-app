@@ -3,17 +3,30 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 
-import type { CalendarDay } from "@/lib/feed/occurrences";
+import { nearestDay, type CalendarDay } from "@/lib/feed/occurrences";
 import { selectOccurrence, unselectOccurrence } from "../feed/actions";
 import type { FeedCard } from "../feed/data";
 import { EVENT_TYPE_LABELS, type ActionResult } from "../feed/view";
 
 /**
- * The Calendar page (spec 07 item 6): a month grid plus a day-by-day list of
- * the same FeedCard[] the Feed reads. Clicking a day in the grid is an
- * in-page anchor to that day's section in the list -- no client state needed
- * when the list is already fully rendered server-side.
+ * The Calendar page (spec 07 item 6, day-click behavior added by the spec 07
+ * addendum: calendar-and-community-fields). A month grid plus a day-by-day
+ * Upcoming list, `byDay` already filtered to committed selections only
+ * (page.tsx). Clicking a day scrolls/highlights the Upcoming list -- it never
+ * navigates, and it never silently no-ops even when the clicked day has
+ * nothing committed (the addendum's decision 2).
  */
+
+/** "YYYY-MM-DD" -> "Sep 8, 2026", for the empty-day notice. */
+function formatDayLabel(day: string): string {
+  const [y, m, d] = day.split("-").map(Number);
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(y, m - 1, d)));
+}
 
 const WEEKDAY_HEADERS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
@@ -43,6 +56,39 @@ export function CalendarView({
     timeZone: "UTC",
   }).format(new Date(Date.UTC(year, month - 1, 1)));
 
+  const [activeDay, setActiveDay] = useState<string | null>(null);
+  const [emptyNotice, setEmptyNotice] = useState<string | null>(null);
+
+  function handleDayClick(date: string) {
+    const exact = byDay.find((group) => group.day === date);
+    if (exact) {
+      setActiveDay(date);
+      setEmptyNotice(null);
+      document
+        .getElementById(`day-${date}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+
+    const nearest = nearestDay(byDay, date);
+    if (!nearest) {
+      // Nothing committed anywhere this month -- there is nothing to scroll
+      // to, but the click still has to produce something (the addendum's
+      // "do not silently no-op").
+      setActiveDay(null);
+      setEmptyNotice(`Nothing committed on ${formatDayLabel(date)} yet.`);
+      return;
+    }
+
+    setActiveDay(nearest.day);
+    setEmptyNotice(
+      `Nothing committed on ${formatDayLabel(date)}. Showing the nearest day with something on it.`,
+    );
+    document
+      .getElementById(`day-${nearest.day}`)
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   return (
     <div className="flex max-w-4xl flex-col gap-8 md:flex-row">
       <div className="flex-1">
@@ -69,9 +115,11 @@ export function CalendarView({
             </div>
           ))}
           {grid.flat().map((day) => (
-            <Link
+            <button
               key={day.date}
-              href={`#day-${day.date}`}
+              type="button"
+              aria-label={`Day ${day.date}`}
+              onClick={() => handleDayClick(day.date)}
               className={`rounded border p-2 ${
                 day.inMonth
                   ? "border-black/10 dark:border-white/15"
@@ -79,9 +127,18 @@ export function CalendarView({
               } ${day.hasEvents ? "bg-foreground/10 font-medium" : ""}`}
             >
               {Number(day.date.slice(-2))}
-            </Link>
+            </button>
           ))}
         </div>
+
+        {emptyNotice ? (
+          <p
+            role="status"
+            className="mt-3 rounded border border-black/10 p-2 text-xs opacity-80 dark:border-white/15"
+          >
+            {emptyNotice}
+          </p>
+        ) : null}
       </div>
 
       <div className="flex flex-1 flex-col gap-6">
@@ -89,16 +146,24 @@ export function CalendarView({
 
         {byDay.length === 0 ? (
           <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm">
-            Nothing coming up.{" "}
-            <Link href="/communities" className="underline">
-              Scrape a community&apos;s calendar from the Communities page
+            Nothing on your calendar yet.{" "}
+            <Link href="/feed" className="underline">
+              Select some events on the Feed
             </Link>{" "}
-            to find events.
+            to add them here.
           </p>
         ) : null}
 
         {byDay.map((group) => (
-          <section key={group.day} id={`day-${group.day}`} className="flex flex-col gap-2">
+          <section
+            key={group.day}
+            id={`day-${group.day}`}
+            className={`flex flex-col gap-2 ${
+              group.day === activeDay
+                ? "-m-2 rounded-lg p-2 ring-2 ring-foreground/40"
+                : ""
+            }`}
+          >
             <h3 className="border-b border-black/10 pb-1 text-sm font-medium opacity-70 dark:border-white/15">
               {group.day}
             </h3>

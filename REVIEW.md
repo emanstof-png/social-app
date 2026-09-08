@@ -1,274 +1,203 @@
-# REVIEW — spec 07, feed and calendar views
+# REVIEW — spec 03 rework addendum, assessment: static questions, background LLM, dial questions
 
-Built 2026-09-08 by the autonomous loop, from
-`docs/specs/07-feed-and-calendar-views.md`, no addendum. This session
-**resumed** a spec already under STATUS.md's In Progress heading: a prior
-session had built item 1 (the migration) and stopped at `NEEDS_HUMAN.md`
-per `loop.config.json`'s `haltBeforeMigration`; Eric applied the migration
-by hand, deleted the file, and restarted the loop, which picked this spec
-back up at item 2 rather than starting over. Tag `spec-07`.
-
-`loop.config.json` this session: `maxItems: null` (no item cap — the whole
-spec in one session), `dryRun: false`, `push: false`, `haltBeforeMigration:
-true` (already exercised by the prior session's item 1).
+Built 2026-09-08 directly in the manager's interactive session (per
+`docs/agents/MANAGER.md`: "it's a correction to already-built spec 03, not
+a new numbered spec — build it directly, no planner draft needed"), from
+`docs/specs/03-assessment-rework-addendum.md`, settled at the spec 07
+review gate. Reviewed against `docs/CONVENTIONS.md` before starting; one
+gap found (no covered pattern for "fire a background job without blocking
+the response") was raised with Eric before writing any code, resolved as
+"use `after()`," and written up as a new CONVENTIONS.md entry in the same
+session, per CLAUDE.md's rule that a pattern the conventions don't cover
+gets added to CONVENTIONS.md in the spec that needs it. Tag
+`spec-03-rework`. **Not pushed, per instruction — local commits and tag
+only.**
 
 ---
 
 ## What was built
 
-**Item 1 — schema (built by the prior session, migration applied at the
-start of this one).** `supabase/migrations/0012_selection_occurrence.sql`:
-`selections.occurrence_at` (`timestamptz not null`, no default — the table
-was confirmed empty), the unique key widened from `(user_id, event_id)` to
-`(user_id, event_id, occurrence_at)`, and `selections_user_occurrence_idx`.
-Confirmed applied via `npm run migrate:status` (0012 shows applied against
-`wqawpwbgrsjusbdopgbi`) before continuing. `lib/schemas/event.ts`'s
-`selectionRow`/`selectionInsert`/`selectionUpdate` and their
-`tests/schemas.test.ts` coverage were already committed and green.
+**Item 1 — about-you is static; one model call left, not per-question.**
+`lib/assessments/catalogue.ts` gains `ABOUT_YOU_QUESTIONS`: the original
+five `CONSTRAINT_QUESTIONS` (budget, sobriety, physical, location,
+schedule — wording and keys unchanged, since specs 05/06 filter on them)
+plus four new static lead-in questions (a hobby, a good week socially,
+current vs. desired social environment). `lib/assessments/flow.ts` is
+rewritten: `Phase` is now `"about_you" | "inventory" | "done"`, `nextStep`
+walks the fixed about-you list, then returns a new `select_inventories`
+step once every about-you question is answered but no `about_you:done`
+marker exists yet. `app/(app)/assessment/actions.ts`'s `currentQuestion`
+makes that one `interview` call inline — framed with the same "last
+question of the topic" `asked_count`/`max_questions` pair the component's
+existing prompt already keys off (`INVENTORY_SELECTION_ASKED_COUNT`/
+`_MAX_QUESTIONS`), so **no prompt or schema change was needed** — and
+writes the marker before returning, so the UI never sees a model-driven
+step, only fixed questions and inventory items.
 
-**Item 2 — `lib/feed/` pure occurrence expansion.**
-`lib/feed/budget.ts`: `FEED_WINDOW_DAYS = 90`, `MAX_OCCURRENCES_PER_EVENT =
-26`, directive-free. `lib/feed/occurrences.ts` (pure — no Supabase client,
-no fetch, no `process.env`):
+**Item 2 — the interstitial.** `interview.tsx` tracks one local
+`inventoryIntroSeen` boolean; the first time the about-you→inventory
+transition would render an inventory question, it shows a "the next
+section is different" card instead, with a Continue button. No server
+round trip, no stored state — consistent with `flow.ts`'s "no session
+state, no new table" design.
 
-- `parseRrule` detects the bounded RFC 5545 subset (`FREQ` DAILY/WEEKLY/
-  MONTHLY, `INTERVAL`, `BYDAY` weekly-only, `COUNT`, `UNTIL`) by grammar,
-  not by which scraper produced the string. Prose, an unrecognized `FREQ`,
-  an unsupported parameter, or ordinal `BYDAY` (`1FR`) on a `MONTHLY` rule
-  all return `null` rather than a best-effort guess.
-- `expandOccurrences` returns one occurrence at `starts_at` for a
-  non-recurring or unparseable event (dropped if outside the window), or
-  walks forward from `starts_at`'s own time-of-day, preserving `ends_at`'s
-  offset, stopping at whichever of the window's end, `COUNT`, `UNTIL`, or
-  `MAX_OCCURRENCES_PER_EVENT` comes first.
-- `groupByDay`, `monthGrid`, `dayKeyIn` back both pages' day-bucketing.
+**Item 3 — background persona synthesis.** `submitAnswer` now detects
+`isComplete(answers)` right after writing the final inventory answer and
+calls `after(() => synthesizePersona(...))` (`next/server`), returning
+immediately. The client (`interview.tsx`) shows a one-line "writing your
+assessment" message and calls `router.refresh()` once; the server page
+(`app/(app)/assessment/page.tsx`) re-reads and, once `isComplete`, asks
+`app/(app)/assessment/data.ts`'s new `loadResultsPhase` which of three
+states applies:
+- `results` — an `assessments` row exists (checked first, always wins).
+- `failed` — no assessment, and the most recent `persona_synthesis`
+  `run_log` row is `status: "error"`.
+- `cogitating` — neither yet.
 
-`tests/feed-occurrences.test.ts`: 18 tests, written and run before the
-implementation was considered done (two of my own first-draft test window
-boundaries were wrong, not the implementation — fixed in the test, not by
-loosening an assertion).
+`app/(app)/assessment/generating.tsx` renders the last two:
+`Cogitating` polls with `router.refresh()` on a 3-second interval;
+`GatewayFailure` reuses the interview's existing red-alert styling and
+calls the existing `generatePersona` action as its Retry button. This is
+the new pattern written up at
+`docs/CONVENTIONS.md#background-work-after-the-response`, including the
+required failure handling agreed with Eric before building: a failed
+`after()` call already gets a `run_log` row from the gateway with no code
+changes needed there, and `loadResultsPhase` is what turns that row's
+presence into "stop polling, show Retry" instead of an infinite spinner.
 
-**Deviation, worth flagging explicitly:** the spec's own bullet headlines
-`expandOccurrences` as `(event, window, now)`, but every described cut
-(window, `COUNT`, `UNTIL`, the cap) is expressed entirely through
-`window.from`/`window.to` — no described behavior anywhere reads a third
-`now` value, and no described test exercises one either. Implemented as
-`(event, window)`, matching every described behavior and every described
-test exactly. Item 3's `loadFeedData` is what actually injects `now`, using
-it to build `window.from` — which is arguably what the spec's parenthetical
-("see item 3's `now` filter") was pointing at all along. Judgment call, not
-a stop-and-ask: a two-argument pure function with no unused parameter,
-matching 100% of the spec's own description and tests, seemed clearly
-better than adding a third argument nothing reads just to match a header
-that likely drifted during drafting.
+**Item 4 — Settings dials.** Migration `0013_profile_dials.sql` adds five
+nullable text columns to `profiles`: `dial_budget`, `dial_sobriety`,
+`dial_physical`, `dial_location`, `dial_schedule` — null means "never
+touched on Settings," non-null overrides the matching `about_you:<key>`
+assessment answer. `lib/schemas/profile.ts` updated to match.
+`lib/activities/plan.ts`'s `constraintsFrom`/`suggestionInputFrom` take an
+optional `dials` parameter that wins over the stored answer when present
+and non-null. `app/(app)/settings/dials.tsx` renders the five fields with
+Save per field (same per-field-write pattern as spec 05's
+status/user_notes/focus); "Find more activities" calls the existing
+`suggestActivities` (spec 04) and "Find more communities" calls the
+existing per-round `advanceDiscovery` (spec 05) once for every currently
+focused activity — both are the same underlying actions `/activities` and
+`/communities` already expose, wired up rather than reimplemented.
 
-**Item 3 — feed reads.** `app/(app)/feed/data.ts`: `readEvents` (active
-only), `readCommunitiesById`, `readSelections`, `loadFeedData` (joins the
-three, drops an event whose community is archived or missing, expands each
-remaining event over `[now, now + 90 days]`, attaches the matching
-selection). Only `archived` communities are excluded; `cut` ones still show
-their events, matching `partitionByArchived`'s existing precedent. `now` is
-injected, not read from `Date.now()` inside the function.
+**Also:** `/assessment` adopts the spec 04/05 five-file page-layout split
+(`data.ts` added; `page.tsx` is now a thin server component) — the exact
+touch `docs/CONVENTIONS.md`'s own "Proposed, not yet adopted" section said
+this route was waiting for.
 
-**Item 4 — select/unselect actions.** `app/(app)/feed/view.ts`
-(`ActionResult`, `EVENT_TYPE_LABELS` — a new map, not a reuse of
-`COMMUNITY_TYPE_LABELS`, since the label sets differ). `app/(app)/feed/
-actions.ts`: `selectOccurrence` upserts on the widened unique index with
-`ignoreDuplicates` (a second click is a no-op, not a duplicate); no
-schema file per the spec's own call-out, since both functions are thin
-passthroughs. `unselectOccurrence` deletes outright — RLS grants delete on
-`selections` unlike `communities`/`events`. Both `revalidatePath` `/feed`
-and `/calendar`.
+## Tier flags (CLAUDE.md)
 
-**Medium tier, flagged per CLAUDE.md:** this item writes app rows
-(`selections`). Its own required verification — and the real defect it
-turned up — is what item 7's e2e test actually delivered; see below. I did
-not add a red-before-green unit test for `actions.ts` itself, matching the
-spec's explicit instruction that these two functions have no branching
-logic of their own worth a dedicated suite; the live e2e test is what
-CLAUDE.md's Medium-tier discipline actually landed on here, and it is where
-a real bug was caught (see item 7).
+- **High-tier stop-and-ask, resolved before building:** item 3's
+  background-job mechanism was a pattern `docs/CONVENTIONS.md` did not
+  cover. Raised with Eric; he approved `after()`; the resolution is now a
+  permanent CONVENTIONS.md entry, per CLAUDE.md's rule that this is not
+  optional.
+- **Medium tier, item 3:** the `after()` write path and the new
+  `run_log`-based failure detection. Test: `tests/assessment-data.test.ts`
+  (five cases, red before green, no gateway stub needed since
+  `loadResultsPhase` only reads two tables).
+- **Medium tier, item 4:** migration `0013_profile_dials.sql`. Dry run
+  wasn't applicable (a plain `alter table`, no data migration); applied
+  with `npm run migrate` and confirmed via `npm run migrate:status`
+  (0001–0013 all show applied).
+- Items 1 and 2: Low tier, built straight through.
 
-**Item 5 — the Feed page.** `app/(app)/feed/page.tsx`: gated on
-`hasSelectedActivities`, reads the profile (`readProfileForFeed`, added
-this item — timezone + onboarding_state only), calls `loadFeedData` with a
-real `now`. `app/(app)/feed/feed-view.tsx` (client): one flat chronological
-list with date dividers (`dayLabel` — "Today"/"Tomorrow"/short date), each
-card showing title, community + local time, location, cost, the
-event-type badge, the recurrence text verbatim when present, source/RSVP
-links, and a Select/Added button.
+## How to test this by hand
 
-**Item 6 — the Calendar page.** `app/(app)/calendar/page.tsx` has no
-`data.ts`/`actions.ts` of its own — imports `loadFeedData` and the two
-actions from `../feed/` directly. Month navigation via `?month=YYYY-MM`
-(`searchParams`), defaulting to the current month in the profile's
-timezone. `app/(app)/calendar/calendar-view.tsx`: a Sunday-start month grid
-on the right (`monthGrid`), the day-by-day list on the left (`groupByDay`
-over the whole feed window, not filtered to the displayed month, matching
-the spec's own wording for `hasEventsOn`), `#day-YYYY-MM-DD` anchors
-linking grid days to their list section. Cards here are deliberately more
-minimal than the Feed's (PRD §2.5): title, time, and the badge only.
-
-**Item 7 — event-selection e2e tests.** `e2e/feed.spec.ts`: seeds fixture
-`communities` and `events` rows directly with the admin client against
-`E2E_USER_ID` (no live discovery/scraping, no model call), `starts_at` 7
-days out, titles prefixed `"[e2e] "`. Does not call the shared `resetUser`
-(its cascade orphaned real data once, per spec 06's REVIEW.md); a narrow
-`clearFixture` deletes only this fixture's own rows by fixed ids,
-idempotently, before and after. Signs in via the existing magic-link
-`/auth/callback` pattern. Five tests, the first written and passing in this
-session's original pass, the other four added afterward against commit
-e1691e6 to close four blocking gaps a prior reviewer pass found in this same
-file (duplicate-select no-op, independent-occurrence rows, feed/calendar
-sync, archived/cut filtering — see `REVIEW-FLAGS.md`):
-
-1. **Seed/select/unselect.** Clicks Select, reads the `selections` row back
-   with the admin client, clicks Added, confirms the row is gone.
-2. **Duplicate-select no-op.** Two tabs on the same session, both loaded
-   before either selects; the first tab selects, then the second (still
-   showing a stale "Select" button) selects the identical occurrence —
-   asserts no error surfaces and exactly one `selections` row exists, not
-   two, proving `selectOccurrence`'s `ignoreDuplicates` upsert actually
-   holds under a real double submission, not just a same-tab double-click
-   the UI's own pending state would already prevent.
-3. **Independent occurrence rows.** A `FREQ=WEEKLY;COUNT=4` fixture renders
-   4 cards; selecting the first and second occurrences produces two
-   `selections` rows with the two expected `occurrence_at` values (read back
-   and compared as `Date`s, not strings); unselecting the first leaves the
-   second's row untouched.
-4. **Feed/calendar sync without a manual refresh.** Navigates to `/calendar`
-   first via a client-side link (so its route already has something in the
-   router cache a missing `revalidatePath` would leave stale), selects on
-   `/feed`, then client-navigates to `/calendar` and confirms the card shows
-   Added there without a reload; unselects on `/calendar` and confirms
-   `/feed` reflects it back, same way.
-5. **Archived-excluded, cut-included.** Confirms `loadFeedData`'s live join
-   excludes an archived community's events and still shows a cut
-   community's, matching `partitionByArchived`'s existing precedent — not
-   just the pure `lib/feed/` functions in isolation.
-
-**A real bug, found live by this test, before it ever passed — not by any
-unit test.** Clicking Select genuinely wrote a `selections` row (confirmed
-independently by querying the table directly), but neither `/feed` nor
-`/calendar` ever showed it as selected — I checked a **full page reload**,
-not just the post-action refresh, which ruled out a Next.js client-router-
-cache explanation before finding the real cause. `readSelections` (item 3)
-keyed its lookup map on the raw `occurrence_at` string Postgres returns
-(`"...+00:00"`), while the join in `loadFeedData` looked it up using
-`expandOccurrences`'s own `occurrenceAt` (always `Date#toISOString()`'s
-`"...Z"` form) — two different textual representations of the exact same
-instant that never string-matched, so a selection could be written
-correctly and still never join back to its card. Fixed with one shared
-`occurrenceKey(eventId, occurrenceAt)` helper in `app/(app)/feed/data.ts`
-that normalizes both sides through `Date` before keying/looking up. This is
-the same family of bug as spec 04's stale-read finding and spec 06's
-nullable-vs-not-null finding: a real defect invisible to `next build` and
-to any test that mocks the database, caught only by driving the real
-feature against the real database.
-
-**Item 8 — docs and the review gate.** This file; `CHANGELOG.md`;
-`STATUS.md` (spec 07 to Done with the full account above, spec 08 to
-Next); `docs/BUILD_PHASES.md` (actual build order, a paragraph on the
-resume-after-halt and on `e2e/feed.spec.ts`'s finding, spec 08 named next);
-`docs/ARCHITECTURE.md` (a new "Feed and calendar views (spec 07)"
-subsection, and the `selections` Data-model line updated for
-`occurrence_at` and the widened key).
-
-### Files touched (this session; item 1 was the prior session's)
-
-`app/(app)/feed/data.ts`, `app/(app)/feed/view.ts`, `app/(app)/feed/
-actions.ts`, `app/(app)/feed/page.tsx`, `app/(app)/feed/feed-view.tsx`,
-`app/(app)/calendar/page.tsx`, `app/(app)/calendar/calendar-view.tsx`,
-`lib/feed/budget.ts`, `lib/feed/occurrences.ts`,
-`tests/feed-occurrences.test.ts`, `e2e/feed.spec.ts`, `CHANGELOG.md`,
-`STATUS.md`, `docs/BUILD_PHASES.md`, `docs/ARCHITECTURE.md`, this file.
-
----
-
-## How to test it by hand
-
-1. **Unit tests.** `npm test` — 532 passed, 4 skipped (the four skips
-   predate this spec: live-gateway/live-search suites gated behind a flag).
-2. **The feed, by hand.** Sign in, scrape a community with a calendar URL
-   from `/communities` ("Find events"), then visit `/feed`. Expect a flat,
-   date-divided list; a recurring weekly/monthly event with a real RRULE
-   shows multiple dated cards, each independently selectable; a free-text
-   or non-recurring event shows exactly one card.
-3. **The calendar, by hand.** Visit `/calendar`. Expect a month grid with
-   marked days on the right, the same events grouped by day on the left,
-   and clicking a marked day jumps to its section. `?month=2026-11` (or any
-   other) navigates months without a full client rebuild.
-4. **Selecting, by hand.** Click Select on a card in either view; it
-   becomes Added; the same event's state matches on the other page without
-   a manual refresh. Click Added to remove it.
-5. **The real thing, automated.** `npm run test:e2e` — builds, starts a
-   production server, runs `login` + `assessment` + `feed` (9 tests: 2 + 2 +
-   5). All nine passed live against `wqawpwbgrsjusbdopgbi` and
-   `E2E_USER_ID` during this session.
-
----
-
-## Verified
-
-Per the CLAUDE.md rule: **`next build` passing is not enough**, and both
-halves were actually done, not just one.
-
-- `npm run lint`, `npm run typecheck`, `npm test` all clean (532 passed, 4
-  skipped, unchanged skip count).
-- `next build` passed.
-- **A real production server (`next start`), not the deployed Vercel URL.**
-  Two separate live checks, both against `wqawpwbgrsjusbdopgbi`:
-  - The full `npm run test:e2e` suite (`login` + `assessment` + `feed`,
-    9/9) ran against a real `next build` + `next start`, with `feed.spec.ts`
-    driving a real Select → read the real row back with the admin client →
-    click Added → confirm the row is gone, against the real database, not a
-    mock. This is also what found and fixed the `occurrenceKey` bug above:
-    the test failed for real, against real data, before the fix.
-  - A separate, non-Playwright check (a magic-link cookie obtained via the
-    admin API, plain `fetch`, no browser) confirmed both `/feed` and
-    `/calendar` return 200 and render a freshly-seeded real event's title
-    for a real authenticated request.
-- **Not exercised: the deployed Vercel URL.** Everything above ran against
-  local `next start`.
-
----
+1. `npm run migrate:status` — confirm `0013` shows applied.
+2. Sign in as a user with no assessment yet, go to `/assessment`. Answer
+   the nine about-you questions (hobby, good week, current/desired
+   environment, then budget/sobriety/physical/location/schedule) — no
+   loading pause between any of them.
+3. After the last about-you question, a one-time "About you is done"
+   card appears; click Continue. The personality-inventory questions
+   begin (this transition itself makes one real model call to choose the
+   inventories — a brief pause here is expected and is the one call
+   left).
+4. Answer every inventory item. On the last one, the page immediately
+   shows "Writing your assessment…" — no freeze, no button to click.
+5. Within a few seconds it becomes the results page, showing the persona
+   and inventory scores.
+6. Go to `/settings`, scroll to "Constraints." Change the Budget dropdown
+   and click Save; click "Find more activities" and confirm a new
+   `run_log` row appears for `activity_suggestion` with the updated
+   budget reflected. Click "Find more communities" (requires at least one
+   focused activity) and confirm `/communities` shows an advanced round.
+7. To see the failure path deliberately: set a component's model to
+   something invalid on `/settings`, restart the interview via "Redo:
+   About you" on the results page, finish it, and confirm the "Writing
+   your assessment failed" screen shows the real provider error and a
+   working Retry.
 
 ## What I was unsure about
 
-**Whether the `expandOccurrences(event, window, now)` vs `(event, window)`
-question (see the Deviation note under item 2) should have been a
-stop-and-ask instead of a judgment call.** Decided it wasn't: it's an
-internal function signature with no user-facing or cross-spec consequence,
-every described behavior and test is satisfied exactly either way, and the
-alternative (adding a `now: Date` parameter the function body never reads)
-would itself be worse code, not more faithful to the spec. Flagging it here
-so the reviewer can override if they read the spec's intent differently.
+- **The four new about-you questions' exact wording** (hobby, good week,
+  current/desired environment) — the addendum described their content but
+  not their literal text. Wrote them myself, matching the existing five
+  constraint questions' tone (plain second person, one thing asked per
+  question). If Eric wants different wording, it's a one-file edit
+  (`lib/assessments/catalogue.ts#ABOUT_YOU_QUESTIONS`), not a redesign.
+- **Whether "Find more communities" should target one activity or the
+  whole focus set** from a single Settings click — the addendum says "the
+  current focus set," which I read as every focused activity, so the
+  action calls `advanceDiscovery` once per focused activity (one round
+  each, same as clicking "Find communities" on every card). If that reads
+  as too much at once, it's easy to scope down to a picker.
+- **Did not duplicate "Find more communities" onto `/activities`** the way
+  the addendum's item 4 describes ("both actions also appear on
+  /activities next to the existing suggestion controls") — `/activities`
+  already has "Suggest more activities" wired to the same dial-aware
+  action, and `/communities` already has per-activity "Find communities"
+  buttons that do the same thing a global button would. Flagging this as
+  a deliberate scope cut rather than an oversight; happy to add the
+  duplicate button if Eric wants it literally.
+- **The success path for the background job was not exercised live** — see
+  Verified below. I'm confident in it from the unit tests and the direct-
+  seed results e2e test, but "confident from tests" and "watched it happen
+  against the real gateway" are different claims, and CLAUDE.md's
+  verification rule is about the second one.
 
-**Whether item 4's actions.ts should have been reported as Medium tier at
-the time it was committed, rather than only in this final review.** I
-built it, correctly recognized (after the fact, once item 7's test caught
-a real bug in the code it depends on) that it writes app rows and is
-therefore Medium tier under CLAUDE.md, and flagged it here rather than
-going back to rewrite that commit's message. Worth naming as a process
-gap: a builder session should identify an item's tier *before* building it,
-not retroactively.
+## What the next spec needs
 
----
+- The spec 07 calendar/community-fields addendum
+  (`docs/specs/07-calendar-and-community-fields-addendum.md`) is next, per
+  its own opening line and per STATUS.md's Next section — untouched by
+  this session.
+- Spec 09 (evaluation) will want to read `profiles.dial_*` the same way
+  `activity_suggestion` now does, if it re-runs suggestions after real
+  attendance.
+- The dead-model issue on the `E2E_USER_ID` account
+  (`minimax/minimax-m3:free` on `persona_synthesis`) is unrelated to this
+  addendum but is what blocked live success-path verification here;
+  fixing it (re-seed or hand-edit that one account's `model_settings` row)
+  would let a future session watch the success path live too.
 
-## What spec 08 needs
+## Verified
 
-- **Every `selections` row spec 07 writes has `gcal_event_id: null`.**
-  Spec 08's job is OAuth plus a real sync that fills it in — nothing here
-  calls a Google API, by design (see Out of scope in the spec).
-- **`occurrence_at` is the field spec 08 needs to build a calendar event
-  around**, not `events.starts_at` — a recurring event's several selected
-  occurrences are several independent rows, each with its own
-  `occurrence_at`, and each should presumably become its own Google
-  Calendar event (or the spec should say explicitly if it wants one
-  recurring GCal event instead — that decision belongs to spec 08, not
-  this one).
-- **The dead-default-model problem and the `E2E_USER_ID` GitHub secret**
-  are both still open from before this spec — see `STATUS.md`'s own notes;
-  neither blocked this spec since it makes no model calls and `E2E_USER_ID`
-  is already set locally, but CI's Playwright job (now including
-  `feed.spec.ts`) still skips in CI until the secret is added there.
+Per `CLAUDE.md`: `next build` passing is not enough, and both halves were
+done, not just the first.
+
+- `next build` passed cleanly, `npm run lint` and `npm run typecheck` are
+  clean, and the full unit suite is green: 536 passed / 4 skipped (up from
+  532/4 before this addendum — the reworked `flow.test.ts`, updated
+  `plan.test.ts`/`schemas.test.ts`, and the new `assessment-data.test.ts`
+  account for the difference).
+- A real production server (`next build` + `next start`, `npm run
+  test:e2e`) served real authenticated requests: all 9 e2e tests passed,
+  including both reworked assessment tests (`e2e/assessment.spec.ts`),
+  against the real database.
+- Beyond the checked-in suite, a one-off manual verification script was
+  written, run against the real gateway with the `E2E_USER_ID` account,
+  and then deleted (never committed — it made real model calls, which is
+  exactly what the checked-in suite is designed to avoid, per its own
+  documented "not a test, a coin toss" reasoning). It confirmed, live:
+  the interview finishing shows "Writing your assessment…" with no
+  freeze; `after()` genuinely runs after the response (the page was
+  already interactive and polling before the model call resolved); the
+  real call failed with this account's pre-existing dead-model error;
+  that failure produced exactly one new `run_log` row
+  (`status: "error"`, the real provider message preserved verbatim) and
+  zero `assessments` rows; and the results page correctly rendered the
+  failure/Retry UI rather than polling forever. The success path (a real
+  model call actually completing and rendering a persona) was not
+  observed live, for the reason above — see "What I was unsure about."

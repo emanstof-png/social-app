@@ -44,32 +44,32 @@ const assessment = {
 
 const answers: StoredAnswer[] = [
   {
-    question_id: "constraints:budget",
+    question_id: "about_you:budget",
     question_text: "What can you comfortably spend?",
     answer: "Nothing — free events only",
   },
   {
-    question_id: "constraints:sobriety",
+    question_id: "about_you:sobriety",
     question_text: "Does alcohol change whether a group suits you?",
     answer: "I need alcohol-free settings",
   },
   {
-    question_id: "constraints:physical",
+    question_id: "about_you:physical",
     question_text: "Anything physical to plan around?",
     answer: "nothing",
   },
   {
-    question_id: "constraints:location",
+    question_id: "about_you:location",
     question_text: "Where should we look?",
     answer: "Arlington, up to 30 minutes",
   },
   {
-    question_id: "constraints:schedule",
+    question_id: "about_you:schedule",
     question_text: "When are you free?",
     answer: "Weeknights after 6",
   },
   {
-    question_id: "hobbies:1",
+    question_id: "about_you:hobby",
     question_text: "What did you do last month?",
     answer: "Long walks.",
   },
@@ -135,6 +135,20 @@ describe("suggestionInputFrom", () => {
     // suggestionInputFrom builds what runComponent will validate; if the two
     // ever drift, fail here rather than at a provider call.
     expect(() => suggestionInputFrom(assessment, answers, [])).not.toThrow();
+  });
+
+  it("a touched Settings dial overrides the stored answer (spec 03 rework addendum)", () => {
+    const input = suggestionInputFrom(assessment, answers, [], {
+      budget: "Up to about $50 a month",
+    });
+    expect(input.constraints.budget).toBe("Up to about $50 a month");
+    // Untouched dials still fall back to the assessment answer.
+    expect(input.constraints.sobriety).toBe("I need alcohol-free settings");
+  });
+
+  it("a null dial (never touched) does not blank out the stored answer", () => {
+    const input = suggestionInputFrom(assessment, answers, [], { budget: null });
+    expect(input.constraints.budget).toBe("Nothing — free events only");
   });
 });
 

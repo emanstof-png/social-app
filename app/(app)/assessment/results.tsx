@@ -22,9 +22,10 @@ export type Persona = {
   model_run_id: string | null;
 };
 
-const SECTIONS = (["hobbies", "inventory", "desires", "constraints"] as const).map(
-  (phase) => ({ phase, label: PHASE_LABELS[phase] }),
-);
+const SECTIONS = (["about_you", "inventory"] as const).map((phase) => ({
+  phase,
+  label: PHASE_LABELS[phase],
+}));
 
 export function Results({
   persona,

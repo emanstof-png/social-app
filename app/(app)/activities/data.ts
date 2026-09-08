@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   seedRowsFrom,
   normalizeName,
+  type ConstraintDials,
   type PlanActivity,
   type PlanAssessment,
 } from "@/lib/activities/plan";
@@ -66,10 +67,17 @@ export async function readActivities(
 export async function readProfile(
   supabase: Db,
   userId: string,
-): Promise<{ cap: number; onboardingState: string }> {
+): Promise<{
+  cap: number;
+  onboardingState: string;
+  /** The Settings dials (spec 03 rework addendum); null means never touched. */
+  dials: ConstraintDials;
+}> {
   const { data, error } = await supabase
     .from("profiles")
-    .select("focus_cap, onboarding_state")
+    .select(
+      "focus_cap, onboarding_state, dial_budget, dial_sobriety, dial_physical, dial_location, dial_schedule",
+    )
     .eq("user_id", userId)
     .maybeSingle();
 
@@ -78,6 +86,13 @@ export async function readProfile(
   return {
     cap: focusCap.catch(FOCUS_CAP_DEFAULT).parse(data?.focus_cap ?? FOCUS_CAP_DEFAULT),
     onboardingState: data?.onboarding_state ?? "new",
+    dials: {
+      budget: data?.dial_budget ?? null,
+      sobriety: data?.dial_sobriety ?? null,
+      physical: data?.dial_physical ?? null,
+      location: data?.dial_location ?? null,
+      schedule: data?.dial_schedule ?? null,
+    },
   };
 }
 

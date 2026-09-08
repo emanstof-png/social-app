@@ -100,10 +100,11 @@ export async function suggestActivities(
   try {
     const { supabase, userId } = await currentUser();
 
-    const [assessment, answers, existing] = await Promise.all([
+    const [assessment, answers, existing, profile] = await Promise.all([
       readAssessment(supabase, userId),
       readAnswers(supabase, userId),
       readActivities(supabase, userId),
+      readProfile(supabase, userId),
     ]);
 
     if (!assessment) {
@@ -125,7 +126,7 @@ export async function suggestActivities(
 
     const result = await runComponent<z.infer<typeof activitySuggestionOutput>>(
       "activity_suggestion",
-      suggestionInputFrom(assessment, answers, existing),
+      suggestionInputFrom(assessment, answers, existing, profile.dials),
     );
 
     const { inserts, updates } = mergeSuggestions(existing, result.output.suggestions);

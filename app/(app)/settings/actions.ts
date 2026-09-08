@@ -3,6 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
+import { suggestActivities } from "@/app/(app)/activities/actions";
+import { readActivities, readProfile as readActivitiesProfile } from "@/app/(app)/activities/data";
+import { advanceDiscovery } from "@/app/(app)/communities/actions";
+import { focusState } from "@/lib/activities/plan";
 import { providerMeta } from "@/lib/llm/catalog";
 import { componentDefinition } from "@/lib/llm/components";
 import { encryptSecret } from "@/lib/llm/crypto";
@@ -407,6 +411,112 @@ export async function completeModelSetup(
     revalidatePath("/settings");
     revalidatePath("/assessment");
     return { ok: true, message: "Model setup complete." };
+  } catch (cause) {
+    return fail(cause);
+  }
+}
+
+// -- Constraint dials (spec 03 rework addendum) -------------------------------
+
+const DIAL_KEYS = ["budget", "sobriety", "physical", "location", "schedule"] as const;
+type DialKey = (typeof DIAL_KEYS)[number];
+
+const saveDialSchema = z.object({
+  key: z.enum(DIAL_KEYS),
+  value: z.string().trim().min(1),
+});
+
+/**
+ * Writes one Settings dial, overriding the matching assessment answer for
+ * activity_suggestion (`constraintsFrom` in lib/activities/plan.ts) from now
+ * on. One field, one write -- the same per-field pattern as spec 05's
+ * status/user_notes/focus, so editing one dial never touches another.
+ */
+export async function saveDial(
+  _prev: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  try {
+    const parsed = saveDialSchema.safeParse({
+      key: formData.get("key"),
+      value: formData.get("value"),
+    });
+    if (!parsed.success) return { ok: false, error: "That is not a dial this app has." };
+
+    const { supabase, userId } = await currentUserId();
+
+    const columns: Record<DialKey, "dial_budget" | "dial_sobriety" | "dial_physical" | "dial_location" | "dial_schedule"> = {
+      budget: "dial_budget",
+      sobriety: "dial_sobriety",
+      physical: "dial_physical",
+      location: "dial_location",
+      schedule: "dial_schedule",
+    };
+
+    const { error } = await supabase
+      .from("profiles")
+      .update({ [columns[parsed.data.key]]: parsed.data.value })
+      .eq("user_id", userId);
+
+    if (error) return { ok: false, error: `Could not save that: ${error.message}` };
+
+    revalidatePath("/settings");
+    return { ok: true, message: "Saved." };
+  } catch (cause) {
+    return fail(cause);
+  }
+}
+
+/**
+ * Re-runs activity_suggestion with whatever the dials currently say. The
+ * button on /activities calls the same underlying action; this one exists so
+ * changing a dial on /settings can trigger it without leaving the page.
+ */
+export async function findMoreActivitiesFromSettings(): Promise<ActionResult> {
+  try {
+    const result = await suggestActivities(null, new FormData());
+    revalidatePath("/settings");
+    return result.ok ? { ok: true, message: result.note ?? "Done." } : result;
+  } catch (cause) {
+    return fail(cause);
+  }
+}
+
+/**
+ * Advances discovery by one round for every activity in the current focus
+ * set (spec 05's per-round resumable run, `advanceDiscovery` in
+ * app/(app)/communities/actions.ts) -- "the current focus set" from the
+ * addendum means every focused activity, not a single one, so this is that
+ * button run once per activity rather than new discovery logic.
+ */
+export async function findMoreCommunitiesFromSettings(): Promise<ActionResult> {
+  try {
+    const { supabase, userId } = await currentUserId();
+
+    const [activities, profile] = await Promise.all([
+      readActivities(supabase, userId),
+      readActivitiesProfile(supabase, userId),
+    ]);
+    const { focus } = focusState(activities, profile.cap);
+
+    if (focus.length === 0) {
+      return {
+        ok: false,
+        error:
+          "Pick activities to focus on first — discovery searches for communities against that set.",
+      };
+    }
+
+    const results = await Promise.all(focus.map((activity) => advanceDiscovery(activity.id)));
+    const failed = results.find((result): result is { ok: false; error: string } => !result.ok);
+    if (failed) return failed;
+
+    revalidatePath("/settings");
+    revalidatePath("/communities");
+    return {
+      ok: true,
+      message: `Advanced discovery for ${focus.length} focused ${focus.length === 1 ? "activity" : "activities"}.`,
+    };
   } catch (cause) {
     return fail(cause);
   }

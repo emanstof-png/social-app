@@ -1,16 +1,16 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
-import { RESPONSE_CHOICES } from "@/lib/assessments/catalogue";
+import { ABOUT_YOU_QUESTIONS, RESPONSE_CHOICES } from "@/lib/assessments/catalogue";
 import {
-  closingAnswerFor,
-  CONSTRAINT_QUESTIONS,
-  DESIRES_DONE_ID,
+  encodeInventorySelection,
   FALLBACK_INVENTORIES,
-  HOBBIES_DONE_ID,
+  INVENTORY_SELECTION_ASKED_COUNT,
+  INVENTORY_SELECTION_MAX_QUESTIONS,
   isComplete,
   nextStep,
   PHASE_LABELS,
@@ -31,7 +31,8 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { answeredSummaries, type InterviewState, type PersonaResult, type Question } from "./view";
 
 /**
- * The assessment's server actions (spec 03 items 4 and 5).
+ * The assessment's server actions (spec 03 items 4 and 5; reworked by the
+ * spec 03 rework addendum).
  *
  * PER-ANSWER WRITES (PRD §1.3): every answer is written to assessment_answers
  * on submit, before the next question is asked. Nothing is batched, so closing
@@ -41,6 +42,12 @@ import { answeredSummaries, type InterviewState, type PersonaResult, type Questi
  * for the UI to show with a Retry button. The interview stops on that question;
  * it never skips it and never invents one. The gateway has already written the
  * error to run_log by the time we get here.
+ *
+ * BACKGROUND SYNTHESIS (docs/CONVENTIONS.md#background-work-after-the-response).
+ * The moment the last inventory answer lands, `submitAnswer` fires
+ * `persona_synthesis` in an `after()` callback and returns immediately; the
+ * results view (see ../data.ts) polls for the `assessments` row rather than
+ * the request waiting on the model.
  */
 
 type Db = SupabaseClient;
@@ -142,12 +149,12 @@ const interviewReply = z.object({
 });
 
 /**
- * Turns the flow engine's next step into a question for the UI, asking the
- * interview component only when the step is an LLM-written one.
+ * Turns the flow engine's next step into a question for the UI.
  *
- * `close_phase` means a capped topic ran out of budget without the model
- * closing it. The marker is written here and the step re-derived, so the
- * ceiling is enforced by code no matter what the model returns.
+ * `select_inventories` is the one model call left in the interview (spec 03
+ * rework addendum): it is made and its marker written here, invisibly to the
+ * caller, and the step re-derived -- so the UI only ever sees a fixed
+ * about-you question or an inventory item, never the model's turn.
  */
 async function currentQuestion(
   supabase: Db,
@@ -156,24 +163,32 @@ async function currentQuestion(
 ): Promise<{ question: Question | null; answers: StoredAnswer[] }> {
   let working = answers;
 
-  for (let guard = 0; guard < 3; guard += 1) {
+  for (let guard = 0; guard < 2; guard += 1) {
     const step = nextStep(working);
 
     if (step.kind === "done") return { question: null, answers: working };
 
-    if (step.kind === "close_phase") {
-      const marker =
-        step.phase === "hobbies"
-          ? {
-              question_id: HOBBIES_DONE_ID,
-              question_text: "Inventories chosen from the hobbies answers",
-              answer: closingAnswerFor("hobbies", FALLBACK_INVENTORIES),
-            }
-          : {
-              question_id: DESIRES_DONE_ID,
-              question_text: "Desires topic closed",
-              answer: closingAnswerFor("desires"),
-            };
+    if (step.kind === "select_inventories") {
+      // Every call is logged in run_log by the gateway, win or lose. Framed
+      // as the topic's last question so the component's existing prompt
+      // returns suggested_assessments (see lib/assessments/flow.ts).
+      const result = await runComponent<z.infer<typeof interviewReply>>("interview", {
+        topic: "hobbies",
+        answers_so_far: transcriptFrom(working),
+        asked_count: INVENTORY_SELECTION_ASKED_COUNT,
+        max_questions: INVENTORY_SELECTION_MAX_QUESTIONS,
+      });
+
+      const reply = interviewReply.parse(result.output);
+      const suggested = reply.suggested_assessments.filter(isCatalogueId);
+
+      const marker = {
+        question_id: "about_you:done",
+        question_text: "Inventories chosen from the about-you answers",
+        answer: encodeInventorySelection(
+          suggested.length > 0 ? suggested.slice(0, 2) : FALLBACK_INVENTORIES,
+        ),
+      };
       await writeAnswer(supabase, userId, marker);
       working = [...working, marker];
       continue;
@@ -196,58 +211,22 @@ async function currentQuestion(
       };
     }
 
-    if (step.kind === "fixed") {
-      return {
-        answers: working,
-        question: {
-          questionId: step.questionId,
-          questionText: step.question.text,
-          help: step.question.help,
-          inputKind: step.question.inputKind,
-          choices: step.question.choices ? [...step.question.choices] : undefined,
-          phase: step.phase,
-          phaseLabel: PHASE_LABELS[step.phase],
-          caption: `Practical constraints · ${
-            CONSTRAINT_QUESTIONS.findIndex((one) => one.key === step.question.key) + 1
-          } of ${CONSTRAINT_QUESTIONS.length}`,
-          closesPhase: false,
-          suggested: [],
-        },
-      };
-    }
-
-    // An LLM-written question. Every call is logged in run_log by the gateway,
-    // win or lose.
-    const result = await runComponent<z.infer<typeof interviewReply>>("interview", {
-      topic: step.topic,
-      answers_so_far: transcriptFrom(working),
-      asked_count: step.askedCount,
-      max_questions: step.maxQuestions,
-    });
-
-    const reply = interviewReply.parse(result.output);
-    const suggested = reply.suggested_assessments.filter(isCatalogueId);
-
-    // The model may finish early; the flow engine finishes it at the cap
-    // whatever the model says.
-    const closesPhase =
-      !reply.more_to_ask || step.askedCount >= step.maxQuestions - 1;
-
+    // step.kind === "fixed": an about-you question.
     return {
       answers: working,
       question: {
         questionId: step.questionId,
-        questionText: reply.question_text,
-        inputKind: reply.input_kind,
-        choices:
-          reply.input_kind === "single_choice" && reply.choices?.length
-            ? reply.choices
-            : undefined,
+        questionText: step.question.text,
+        help: step.question.help,
+        inputKind: step.question.inputKind,
+        choices: step.question.choices ? [...step.question.choices] : undefined,
         phase: step.phase,
         phaseLabel: PHASE_LABELS[step.phase],
-        caption: `${PHASE_LABELS[step.phase]} · question ${step.askedCount + 1} of at most ${step.maxQuestions}`,
-        closesPhase,
-        suggested: step.expectSuggestions || closesPhase ? suggested : [],
+        caption: `About you · ${
+          ABOUT_YOU_QUESTIONS.findIndex((one) => one.key === step.question.key) + 1
+        } of ${ABOUT_YOU_QUESTIONS.length}`,
+        closesPhase: false,
+        suggested: [],
       },
     };
   }
@@ -335,7 +314,7 @@ export async function submitAnswer(
       throw new Error("That answer could not be read. Nothing was saved.");
     }
 
-    const { question_id, question_text, answer, closes_phase, editing } = parsed.data;
+    const { question_id, question_text, answer } = parsed.data;
     const firstAnswer = answers.length === 0;
 
     await writeAnswer(supabase, userId, { question_id, question_text, answer });
@@ -347,31 +326,13 @@ export async function submitAnswer(
     // Onboarding step 2 begins with the very first answer (spec 03 item 4).
     if (firstAnswer) await setOnboarding(supabase, userId, "assessment_started");
 
-    // Closing a capped topic is a decision about the workflow, so it is stored
-    // as its own row rather than held in memory. See lib/assessments/flow.ts.
-    if (!editing && closes_phase) {
-      const suggested = parsed.data.suggested.filter(isCatalogueId);
-
-      if (question_id.startsWith("hobbies:")) {
-        const marker = {
-          question_id: HOBBIES_DONE_ID,
-          question_text: "Inventories chosen from the hobbies answers",
-          answer: closingAnswerFor(
-            "hobbies",
-            suggested.length > 0 ? suggested.slice(0, 2) : FALLBACK_INVENTORIES,
-          ),
-        };
-        await writeAnswer(supabase, userId, marker);
-        answers = [...answers, marker];
-      } else if (question_id.startsWith("desires:")) {
-        const marker = {
-          question_id: DESIRES_DONE_ID,
-          question_text: "Desires topic closed",
-          answer: closingAnswerFor("desires"),
-        };
-        await writeAnswer(supabase, userId, marker);
-        answers = [...answers, marker];
-      }
+    // The interview just finished on this answer: fire persona_synthesis in
+    // the background and return without waiting on it (spec 03 rework
+    // addendum; docs/CONVENTIONS.md#background-work-after-the-response). The
+    // results view polls for the assessments row this writes.
+    if (isComplete(answers)) {
+      const finishedAnswers = answers;
+      after(() => synthesizePersona(supabase, userId, finishedAnswers));
     }
 
     revalidatePath("/assessment");
@@ -393,16 +354,19 @@ export async function submitAnswer(
  * Runs persona_synthesis over the finished interview and stores the result.
  *
  * Regenerating always INSERTS (spec 03 item 5): the earlier assessment is kept
- * and the page reads the latest by generated_at.
+ * and the page reads the latest by generated_at. Shared by the automatic
+ * background trigger in submitAnswer and the manual "Regenerate" action below;
+ * a failure here needs no extra handling beyond what runComponent already
+ * does -- the gateway has written the run_log row the results view checks for
+ * (docs/CONVENTIONS.md#background-work-after-the-response) before this ever
+ * throws.
  */
-export async function generatePersona(
-  _prev: PersonaResult | null,
-  _formData: FormData,
+async function synthesizePersona(
+  supabase: Db,
+  userId: string,
+  answers: StoredAnswer[],
 ): Promise<PersonaResult> {
   try {
-    const { supabase, userId } = await currentUser();
-    const answers = await readAnswers(supabase, userId);
-
     if (!isComplete(answers)) {
       return {
         ok: false,
@@ -456,9 +420,19 @@ export async function generatePersona(
   }
 }
 
+/** The manual "Regenerate the assessment" action on the results page. */
+export async function generatePersona(
+  _prev: PersonaResult | null,
+  _formData: FormData,
+): Promise<PersonaResult> {
+  const { supabase, userId } = await currentUser();
+  const answers = await readAnswers(supabase, userId);
+  return synthesizePersona(supabase, userId, answers);
+}
+
 // -- Redo one section ---------------------------------------------------------
 
-const phaseSchema = z.enum(["hobbies", "inventory", "desires", "constraints"]);
+const phaseSchema = z.enum(["about_you", "inventory"]);
 
 /**
  * Clears one phase's answers so it can be run again (spec 03 item 5).

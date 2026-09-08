@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 import type { InputKind } from "@/lib/assessments/flow";
-import { generatePersona, loadQuestion, submitAnswer } from "./actions";
+import { loadQuestion, submitAnswer } from "./actions";
 import type { AnsweredSummary, InterviewState, Progress } from "./view";
 
 /**
@@ -29,6 +29,7 @@ type Shown = {
   inputKind: InputKind;
   choices?: string[];
   caption?: string;
+  phase?: "about_you" | "inventory";
   closesPhase: boolean;
   suggested: string[];
   initialAnswer: string;
@@ -89,12 +90,29 @@ export function Interview({
           inputKind: live.inputKind,
           choices: live.choices,
           caption: live.caption,
+          phase: live.phase === "done" ? undefined : live.phase,
           closesPhase: live.closesPhase,
           suggested: live.suggested,
           initialAnswer: "",
           editing: false,
         }
       : null;
+
+  // The interstitial before phase B (spec 03 rework addendum): shown once,
+  // client-side only, the first time an inventory question would otherwise
+  // render. Purely a UI pause -- no server round trip, no stored state.
+  const [inventoryIntroSeen, setInventoryIntroSeen] = useState(false);
+  const showInventoryIntro =
+    !editing && shown?.phase === "inventory" && !inventoryIntroSeen;
+
+  // The interview just finished: the server action already fired persona
+  // synthesis in the background (docs/CONVENTIONS.md#background-work-after-
+  // the-response). Move to the results view, which polls until it lands.
+  useEffect(() => {
+    if (state?.ok && state.state === "complete") {
+      router.refresh();
+    }
+  }, [state, router]);
 
   // Reset the draft whenever the question on screen changes.
   const shownId = shown?.questionId ?? null;
@@ -159,11 +177,30 @@ export function Interview({
         </div>
       )}
 
-      {state?.ok && state.state === "complete" && editingIndex === null && (
-        <Completion onGenerated={() => router.refresh()} />
+      {state?.ok && state.state === "complete" && (
+        <p className="text-sm opacity-70" role="status">
+          That&apos;s the whole interview. Writing your assessment…
+        </p>
       )}
 
-      {shown && (
+      {showInventoryIntro && (
+        <div className="rounded-lg border border-black/10 p-5 dark:border-white/15">
+          <h2 className="font-medium">About you is done.</h2>
+          <p className="mt-1 text-sm opacity-80">
+            The next section asks personality questions instead — a different
+            kind of question, not a slow one.
+          </p>
+          <button
+            type="button"
+            onClick={() => setInventoryIntroSeen(true)}
+            className="mt-3 rounded bg-foreground px-4 py-1.5 text-xs font-medium text-background"
+          >
+            Continue
+          </button>
+        </div>
+      )}
+
+      {shown && !showInventoryIntro && (
         <div className="rounded-lg border border-black/10 p-5 dark:border-white/15">
           {shown.caption && (
             <p className="text-xs uppercase tracking-wide opacity-60">{shown.caption}</p>
@@ -343,43 +380,3 @@ function AnsweredSoFar({ answered }: { answered: AnsweredSummary[] }) {
   );
 }
 
-/** Shown once every question is answered: run persona synthesis (item 5). */
-function Completion({ onGenerated }: { onGenerated: () => void }) {
-  const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
-
-  function generate() {
-    startTransition(async () => {
-      const result = await generatePersona(null, new FormData());
-      if (result.ok) {
-        setError(null);
-        onGenerated();
-      } else {
-        setError(result.error);
-      }
-    });
-  }
-
-  return (
-    <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-5">
-      <h2 className="font-medium">That is the whole interview.</h2>
-      <p className="mt-1 text-sm opacity-80">
-        Every answer is saved. Generating reads them and the scored inventories
-        and writes your assessment.
-      </p>
-      <button
-        type="button"
-        onClick={generate}
-        disabled={pending}
-        className="mt-3 rounded bg-foreground px-4 py-1.5 text-xs font-medium text-background disabled:opacity-40"
-      >
-        {pending ? "Writing your assessment…" : "Generate my assessment"}
-      </button>
-      {error && (
-        <p className="mt-3 whitespace-pre-wrap text-xs text-red-700 dark:text-red-400" role="alert">
-          {error}
-        </p>
-      )}
-    </div>
-  );
-}

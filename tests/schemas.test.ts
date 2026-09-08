@@ -191,12 +191,37 @@ describe("row schemas reject bad data", () => {
       home_location: "Arlington",
       onboarding_state: "assessment_complete",
       focus_cap: 3,
+      dial_budget: null,
+      dial_sobriety: null,
+      dial_physical: null,
+      dial_location: null,
+      dial_schedule: null,
       created_at: base.created_at,
       updated_at: base.updated_at,
     };
     expect(schemas.profileRow.parse(profile).focus_cap).toBe(3);
     expect(() => schemas.profileRow.parse({ ...profile, focus_cap: 1 })).toThrow();
     expect(() => schemas.profileRow.parse({ ...profile, focus_cap: 5 })).toThrow();
+  });
+
+  it("a Settings dial is null until touched, then a non-empty string (spec 03 rework addendum)", () => {
+    const profile = {
+      user_id: base.user_id,
+      timezone: "America/New_York",
+      home_location: "Arlington",
+      onboarding_state: "assessment_complete",
+      focus_cap: 3,
+      dial_budget: "Up to about $50 a month",
+      dial_sobriety: null,
+      dial_physical: null,
+      dial_location: null,
+      dial_schedule: null,
+      created_at: base.created_at,
+      updated_at: base.updated_at,
+    };
+    expect(schemas.profileRow.parse(profile).dial_budget).toBe("Up to about $50 a month");
+    expect(schemas.profileRow.parse(profile).dial_sobriety).toBeNull();
+    expect(() => schemas.profileRow.parse({ ...profile, dial_budget: "" })).toThrow();
   });
 
   it("requires an entity_id or entity_name on a preference, as the check constraint does", () => {

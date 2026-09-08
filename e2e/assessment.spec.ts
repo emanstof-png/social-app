@@ -1,8 +1,8 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { expect, test } from "@playwright/test";
 
-import { inventoryById } from "../lib/assessments/catalogue";
-import { CONSTRAINT_QUESTIONS, encodeInventorySelection } from "../lib/assessments/flow";
+import { ABOUT_YOU_QUESTIONS, inventoryById } from "../lib/assessments/catalogue";
+import { encodeInventorySelection } from "../lib/assessments/flow";
 
 /**
  * Spec 12a item 2 — the assessment flow, end to end, against a production
@@ -35,7 +35,7 @@ import { CONSTRAINT_QUESTIONS, encodeInventorySelection } from "../lib/assessmen
 const INVENTORY_ID = "social_style";
 
 /** The question the seed deliberately leaves unanswered. */
-const LAST_CONSTRAINT = CONSTRAINT_QUESTIONS[CONSTRAINT_QUESTIONS.length - 1];
+const LAST_CONSTRAINT = ABOUT_YOU_QUESTIONS[ABOUT_YOU_QUESTIONS.length - 1];
 
 function required(name: string): string {
   const value = process.env[name];
@@ -81,51 +81,61 @@ async function magicLinkTokenHash(admin: SupabaseClient, email: string): Promise
   return tokenHash;
 }
 
+type SeedRow = { user_id: string; question_id: string; question_text: string; answer: string };
+
+function addRow(rows: SeedRow[], userId: string, question_id: string, question_text: string, answer: string) {
+  rows.push({ user_id: userId, question_id, question_text, answer });
+}
+
 /**
- * Every answer the flow engine needs to be one question from the end.
- *
- * The two `:done` marker rows are the flow engine's own (spec 03): they record
- * that a capped LLM phase closed early, and which inventories were chosen.
+ * About-you but the last question, and nothing else (spec 03 rework
+ * addendum). Deliberately NOT complete even once the last question is
+ * answered: about-you finishing would fire the one real model call this
+ * flow has left (choosing the inventories), and the whole point of seeding
+ * is avoiding that coin toss (see the file banner). Resuming and answering a
+ * fixed about-you question is served entirely by deterministic code either
+ * way, which is what this test actually checks.
  */
-function seedRows(userId: string) {
-  const rows: {
-    user_id: string;
-    question_id: string;
-    question_text: string;
-    answer: string;
-  }[] = [];
-
-  const add = (question_id: string, question_text: string, answer: string) =>
-    rows.push({ user_id: userId, question_id, question_text, answer });
-
-  add("hobbies:0", "What did you actually do with your free time last month?",
-    "Long walks on my own, mostly. I used to sail every weekend.");
-  add("hobbies:1", "What did you stop doing that you would pick up again?",
-    "Sailing. I stopped when the club got too far away.");
-  add(
-    "hobbies:done",
-    "Inventories chosen from the hobbies answers",
-    encodeInventorySelection([INVENTORY_ID]),
-  );
-
-  // Every item of the chosen inventory, so phase B is finished.
-  for (const item of inventoryById(INVENTORY_ID).items) {
-    add(`inv:${INVENTORY_ID}:${item.id}`, item.text, "4");
-  }
-
-  add("desires:0", "What do you want your social life to look like in a year?",
-    "A couple of groups where people know my name.");
-  add("desires:done", "Desires topic closed", "closed");
-
-  // Every constraint but the last: that one is what the test answers.
-  for (const question of CONSTRAINT_QUESTIONS.slice(0, -1)) {
-    add(
-      `constraints:${question.key}`,
+function seedPartialRows(userId: string): SeedRow[] {
+  const rows: SeedRow[] = [];
+  for (const question of ABOUT_YOU_QUESTIONS.slice(0, -1)) {
+    addRow(
+      rows,
+      userId,
+      `about_you:${question.key}`,
       question.text,
-      question.choices ? question.choices[0] : "nothing",
+      question.choices ? question.choices[0] : "Long walks on my own, mostly.",
     );
   }
+  return rows;
+}
 
+/**
+ * A fully finished interview: every about-you answer, the inventory-choice
+ * marker, and every item of the chosen inventory. Used only by the results
+ * test below, which seeds its own `assessments` row and never submits
+ * through the UI, so finishing the interview here never reaches `after()`.
+ */
+function seedCompleteRows(userId: string): SeedRow[] {
+  const rows = seedPartialRows(userId);
+  const last = ABOUT_YOU_QUESTIONS[ABOUT_YOU_QUESTIONS.length - 1];
+  addRow(
+    rows,
+    userId,
+    `about_you:${last.key}`,
+    last.text,
+    last.choices ? last.choices[0] : "Weeknights after 6.",
+  );
+  addRow(
+    rows,
+    userId,
+    "about_you:done",
+    "Inventories chosen from the about-you answers",
+    encodeInventorySelection([INVENTORY_ID]),
+  );
+  for (const item of inventoryById(INVENTORY_ID).items) {
+    addRow(rows, userId, `inv:${INVENTORY_ID}:${item.id}`, item.text, "4");
+  }
   return rows;
 }
 
@@ -193,7 +203,7 @@ test.describe("assessment", () => {
   test("resumes at the next unanswered question and writes the answer on submit", async ({
     page,
   }) => {
-    const { error } = await admin.from("assessment_answers").insert(seedRows(userId));
+    const { error } = await admin.from("assessment_answers").insert(seedPartialRows(userId));
     expect(error, error?.message).toBeNull();
 
     const response = await page.goto("/assessment");
@@ -218,7 +228,7 @@ test.describe("assessment", () => {
             .from("assessment_answers")
             .select("answer")
             .eq("user_id", userId)
-            .eq("question_id", `constraints:${LAST_CONSTRAINT.key}`)
+            .eq("question_id", `about_you:${LAST_CONSTRAINT.key}`)
             .maybeSingle();
           return data?.answer ?? null;
         },
@@ -230,16 +240,11 @@ test.describe("assessment", () => {
   test("the results page shows the persona and the inventory scored in code", async ({
     page,
   }) => {
-    // A complete interview: the seed plus the question it left over.
-    const rows = seedRows(userId);
-    rows.push({
-      user_id: userId,
-      question_id: `constraints:${LAST_CONSTRAINT.key}`,
-      question_text: LAST_CONSTRAINT.text,
-      answer: "Weeknights after 6.",
-    });
-
-    const { error } = await admin.from("assessment_answers").insert(rows);
+    // A complete interview, seeded whole, plus its own assessments row: this
+    // never submits through the UI, so it never fires the background
+    // persona_synthesis job (docs/CONVENTIONS.md#background-work-after-the-
+    // response) -- the persona shown here is entirely the seeded row.
+    const { error } = await admin.from("assessment_answers").insert(seedCompleteRows(userId));
     expect(error, error?.message).toBeNull();
     await seedAssessment(admin, userId);
 

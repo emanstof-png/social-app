@@ -9,7 +9,7 @@
 - **Hosting:** Vercel, auto-deploy from `main`.
 
 ## Data model (Supabase tables)
-- `profiles` — user, timezone, home location (Arlington), onboarding state.
+- `profiles` — user, timezone, home location (Arlington), onboarding state. From the spec 03 rework addendum: `dial_budget`, `dial_sobriety`, `dial_physical`, `dial_location`, `dial_schedule` (all nullable text) — the Settings dials, null until touched, overriding the matching `about_you:<key>` assessment answer once set (`constraintsFrom` in `lib/activities/plan.ts`).
 - `assessment_answers` — question_id, question_text, answer, asked_at. Written per answer.
 - `assessments` — generated persona: summary, goals, traits, desired_activities (jsonb), assessment_types_used, generated_at, model_run_id.
 - `activities` — name, rationale, source (assessment | suggested | user), status (active | benched | cut).
@@ -31,6 +31,13 @@
 Every component defines: input schema (Zod), output schema (Zod), system prompt, tools (if any). Gateway resolves model from `model_settings`, calls provider, validates output, retries once, logs to `run_log`. Components: `interview`, `persona_synthesis`, `activity_suggestion`, `discovery_research`, `discovery_extraction`, `event_extraction`, `weekly_planning`, `invite_suggestion`.
 
 No component uses Gemini's Google Search grounding. It is quota-blocked on the free key (reproducible 429 on grounded calls only) and no Google billing is being enabled, so `discovery_research` plans searches that the provider chain runs (spec 05).
+
+## Assessment rework (spec 03 rework addendum)
+About-you (`lib/assessments/catalogue.ts#ABOUT_YOU_QUESTIONS`) is a fixed static list — no model call between questions. The one model call left in the interview is a single `interview` call once about-you closes, to choose which inventories run in phase B; `lib/assessments/flow.ts`'s `nextStep` surfaces this as a `select_inventories` step that `app/(app)/assessment/actions.ts`'s `currentQuestion` absorbs inline (writes the `about_you:done` marker, re-derives the next step), so the UI only ever sees a fixed question or an inventory item.
+
+**Background work after the response** (see `docs/CONVENTIONS.md#background-work-after-the-response`). The moment the last inventory answer completes the interview, `submitAnswer` fires `persona_synthesis` in an `after()` callback (`next/server`) and returns without waiting on it. `app/(app)/assessment/data.ts`'s `loadResultsPhase` is what the results view reads instead: `results` once the `assessments` row exists, `failed` when the most recent `persona_synthesis` `run_log` row is an error newer than it, `cogitating` otherwise. `app/(app)/assessment/generating.tsx`'s `Cogitating` polls with `router.refresh()`; `GatewayFailure` reuses the interview's own failure UI and offers the same manual "Regenerate" action, now the retry path.
+
+**Settings dials.** `profiles.dial_budget/sobriety/physical/location/schedule` (migration 0013) are live overrides of the matching `about_you:<key>` answer, editable on `/settings` (`app/(app)/settings/dials.tsx`). `constraintsFrom` in `lib/activities/plan.ts` prefers a non-null dial over the stored answer. Changing a dial offers "Find more activities" (re-runs `activity_suggestion`, `app/(app)/settings/actions.ts#findMoreActivitiesFromSettings`) and "Find more communities" (advances spec 05 discovery by one round for every currently focused activity, `findMoreCommunitiesFromSettings`) — both call the same underlying actions `/activities` and `/communities` already use, not new logic.
 
 ## Discovery (spec 05)
 Deterministic-first. The models fill two narrow joints and decide nothing else.

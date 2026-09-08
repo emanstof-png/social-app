@@ -96,6 +96,34 @@ to `discovery_runs`, which is what makes an interrupted run resumable rather
 than lost. Budget checks come before phase checks in `nextStep`, so a run cannot
 slip past a hard stop by being mid-round.
 
+## Background work after the response
+
+A single user-triggered job that must not block the response it's part of runs
+in an `after()` callback (`next/server`, App Router), fired from the
+`actions.ts` that owns the write, after the row(s) the job depends on are
+already committed. The response the user sees goes out before the callback
+runs. This is different from `nextStep`'s one-step-per-request reducer
+(`#workflow-engines-are-reducers`): that pattern advances only when the client
+asks again; `after()` keeps running once the client has already moved on, for
+one one-shot job triggered by one action, not a cron or a resumable
+multi-step run. `submitAnswer` in `app/(app)/assessment/actions.ts` (spec 03
+rework addendum) is the first case: it fires `persona_synthesis` in `after()`
+once the interview is complete, and redirects to the results view without
+waiting for the model.
+
+The page waiting on the result polls (`router.refresh()` on an interval) for
+the row the job writes, treating its absence as "still running" -- exactly as
+`assessments` row absence gates the assessment results page.
+
+**The absence case must be able to end.** A failed `after()` call writes its
+`run_log` row the same as every other model call (`#log-tables`) -- the
+gateway does this regardless of who called it. The waiting page distinguishes
+"still running" from "failed" by checking for a `run_log` row for the
+component, in `error` status, newer than the point the job was triggered from,
+with no matching result row: that means show the existing gateway-failure/
+retry UI, not spin forever. Never leave a background failure with nothing on
+screen but a permanent loading state.
+
 ## LLM components
 
 One file per component under `lib/llm/components/`, exporting a

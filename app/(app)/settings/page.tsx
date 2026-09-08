@@ -1,3 +1,4 @@
+import { ABOUT_YOU_QUESTIONS } from "@/lib/assessments/catalogue";
 import { COMPONENTS, PROVIDERS } from "@/lib/llm/catalog";
 import {
   providerKeyStatus,
@@ -10,12 +11,23 @@ import { hasConfiguredModels } from "@/lib/onboarding";
 import { searchProviderStatus } from "@/lib/search/credentials";
 import type { LlmProvider } from "@/lib/schemas/enums";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { Dials, type DialField } from "./dials";
 import { ModelSettings } from "./model-settings";
 import { OnboardingStep } from "./onboarding-step";
 import { ProviderKeys, type KeyStatus } from "./provider-keys";
 import { RunLog, type RunLogEntry } from "./run-log";
 import { SearchLog, type SearchLogEntry } from "./search-log";
 import { SearchProviders } from "./search-providers";
+
+const DIAL_KEYS = ["budget", "sobriety", "physical", "location", "schedule"] as const;
+
+const DIAL_LABELS: Record<DialField["key"], string> = {
+  budget: "Budget",
+  sobriety: "Alcohol",
+  physical: "Physical constraints",
+  location: "Location and travel",
+  schedule: "Schedule",
+};
 
 export const metadata = { title: "Settings — gazelle" };
 
@@ -49,6 +61,7 @@ export default async function SettingsPage() {
     { data: profile },
     { data: runRows },
     { data: searchRows },
+    { data: dialAnswerRows },
   ] = await Promise.all([
       supabase
         .from("model_settings")
@@ -60,7 +73,9 @@ export default async function SettingsPage() {
         .eq("user_id", user.id),
       supabase
         .from("profiles")
-        .select("onboarding_state")
+        .select(
+          "onboarding_state, dial_budget, dial_sobriety, dial_physical, dial_location, dial_schedule",
+        )
         .eq("user_id", user.id)
         .maybeSingle(),
       supabase
@@ -82,6 +97,14 @@ export default async function SettingsPage() {
         .eq("user_id", user.id)
         .order("created_at", { ascending: false })
         .limit(100),
+      supabase
+        .from("assessment_answers")
+        .select("question_id, answer")
+        .eq("user_id", user.id)
+        .in(
+          "question_id",
+          DIAL_KEYS.map((key) => `about_you:${key}`),
+        ),
     ]);
 
   const settings = Object.fromEntries(
@@ -134,6 +157,31 @@ export default async function SettingsPage() {
   const entries = (runRows ?? []) as unknown as RunLogEntry[];
   const searchEntries = (searchRows ?? []) as unknown as SearchLogEntry[];
 
+  const assessmentAnswerByKey = new Map(
+    (dialAnswerRows ?? []).map((row) => [
+      (row.question_id as string).slice("about_you:".length),
+      row.answer as string,
+    ]),
+  );
+
+  const profileDials: Record<string, string | null> = {
+    budget: (profile as { dial_budget?: string | null } | null)?.dial_budget ?? null,
+    sobriety: (profile as { dial_sobriety?: string | null } | null)?.dial_sobriety ?? null,
+    physical: (profile as { dial_physical?: string | null } | null)?.dial_physical ?? null,
+    location: (profile as { dial_location?: string | null } | null)?.dial_location ?? null,
+    schedule: (profile as { dial_schedule?: string | null } | null)?.dial_schedule ?? null,
+  };
+
+  const dials: DialField[] = DIAL_KEYS.map((key) => {
+    const question = ABOUT_YOU_QUESTIONS.find((one) => one.key === key);
+    return {
+      key,
+      label: DIAL_LABELS[key],
+      value: profileDials[key] ?? assessmentAnswerByKey.get(key) ?? "",
+      choices: question?.choices,
+    };
+  });
+
   return (
     <div className="flex max-w-4xl flex-col gap-10">
       <header>
@@ -185,6 +233,17 @@ export default async function SettingsPage() {
           modelsByProvider={modelsByProvider}
           staleProviders={staleProviders}
         />
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <div>
+          <h2 className="text-lg font-medium">Constraints</h2>
+          <p className="mt-1 text-sm opacity-70">
+            Start from your assessment answers. Suggestions and community
+            searches read these live once you&apos;ve saved a change here.
+          </p>
+        </div>
+        <Dials dials={dials} />
       </section>
 
       <section className="flex flex-col gap-3">

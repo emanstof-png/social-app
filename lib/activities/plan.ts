@@ -57,7 +57,7 @@ export function normalizeName(name: string): string {
   return name.trim().toLowerCase();
 }
 
-const CONSTRAINT_PREFIX = "constraints:";
+const CONSTRAINT_PREFIX = "about_you:";
 
 const CONSTRAINT_KEYS = [
   "budget",
@@ -69,8 +69,22 @@ const CONSTRAINT_KEYS = [
 
 type ConstraintKey = (typeof CONSTRAINT_KEYS)[number];
 
-/** The five fixed constraint answers, blank when one was never answered. */
-function constraintsFrom(answers: StoredAnswer[]): Record<ConstraintKey, string> {
+/** The five Settings dials, keyed the same as the constraint answers they can
+ * override (spec 03 rework addendum). Null or absent means "never touched on
+ * Settings." */
+export type ConstraintDials = Partial<Record<ConstraintKey, string | null>>;
+
+/**
+ * The five fixed constraint answers, blank when one was never answered.
+ *
+ * A live Settings dial wins over the stored answer once it has been touched;
+ * this is the one place that decides that, so activity_suggestion always
+ * reads the same values a person sees on /settings.
+ */
+function constraintsFrom(
+  answers: StoredAnswer[],
+  dials: ConstraintDials = {},
+): Record<ConstraintKey, string> {
   const found = {} as Record<ConstraintKey, string>;
   for (const key of CONSTRAINT_KEYS) found[key] = "";
 
@@ -78,6 +92,11 @@ function constraintsFrom(answers: StoredAnswer[]): Record<ConstraintKey, string>
     if (!row.question_id.startsWith(CONSTRAINT_PREFIX)) continue;
     const key = row.question_id.slice(CONSTRAINT_PREFIX.length) as ConstraintKey;
     if (CONSTRAINT_KEYS.includes(key)) found[key] = row.answer;
+  }
+
+  for (const key of CONSTRAINT_KEYS) {
+    const dial = dials[key];
+    if (dial) found[key] = dial;
   }
 
   return found;
@@ -94,6 +113,7 @@ export function suggestionInputFrom(
   assessment: PlanAssessment,
   answers: StoredAnswer[],
   existing: PlanActivity[],
+  dials: ConstraintDials = {},
 ): z.infer<typeof activitySuggestionInput> {
   // Everything already on the list, whatever its status -- a cut activity was
   // rejected and must not come straight back -- plus the persona's own, which
@@ -109,7 +129,7 @@ export function suggestionInputFrom(
     traits: assessment.traits,
     desired_activities: assessment.desired_activities,
     existing_activities: [...names.values()],
-    constraints: constraintsFrom(answers),
+    constraints: constraintsFrom(answers, dials),
   });
 }
 

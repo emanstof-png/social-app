@@ -1,11 +1,12 @@
 import Link from "next/link";
 
-import { isComplete, progressFrom, scoredInventoriesFrom, type StoredAnswer } from "@/lib/assessments/flow";
+import { isComplete, progressFrom, type StoredAnswer } from "@/lib/assessments/flow";
 import { hasConfiguredModels } from "@/lib/onboarding";
-import { assessmentRow } from "@/lib/schemas/assessment";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { loadResultsPhase } from "./data";
 import { Interview } from "./interview";
-import { Results, type Persona } from "./results";
+import { Cogitating, GatewayFailure } from "./generating";
+import { Results } from "./results";
 import { answeredSummaries } from "./view";
 
 export const metadata = { title: "Assessment — gazelle" };
@@ -14,12 +15,16 @@ export const metadata = { title: "Assessment — gazelle" };
 export const dynamic = "force-dynamic";
 
 /**
- * The assessment (PRD §1.1-1.4), built in spec 03.
+ * The assessment (PRD §1.1-1.4), built in spec 03, reworked by the spec 03
+ * rework addendum.
  *
- * Which of the two views renders is derived from the stored rows, not from any
- * session: an unfinished interview shows the interview, a finished one with a
- * generated assessment shows the results. Redoing a section makes the interview
- * unfinished again and this page follows it back.
+ * Which view renders is derived from the stored rows, not from any session:
+ * an unfinished interview shows the interview; a finished one whose
+ * background persona_synthesis (docs/CONVENTIONS.md#background-work-after-
+ * the-response) hasn't landed yet shows a cogitating state that polls; a
+ * finished one with a failed run shows Retry; a finished one with a
+ * generated assessment shows the results. Redoing a section makes the
+ * interview unfinished again and this page follows it back.
  */
 export default async function AssessmentPage() {
   const supabase = await createSupabaseServerClient();
@@ -82,72 +87,48 @@ export default async function AssessmentPage() {
     return <Failure message={cause instanceof Error ? cause.message : String(cause)} />;
   }
 
-  const { data: assessments, error: assessmentError } = await supabase
-    .from("assessments")
-    .select(
-      "summary, goals, traits, desired_activities, assessment_types_used, generated_at, model_run_id",
-    )
-    .eq("user_id", user!.id)
-    .order("generated_at", { ascending: false });
-
-  if (assessmentError) {
-    return <Failure message={`Could not read your assessment: ${assessmentError.message}`} />;
-  }
-
-  const latest = assessments?.[0];
-
-  if (finished && latest) {
-    // Validated on the way out of the database, like every other row (spec 01).
-    const parsed = assessmentRow
-      .pick({
-        summary: true,
-        goals: true,
-        traits: true,
-        desired_activities: true,
-        assessment_types_used: true,
-        generated_at: true,
-        model_run_id: true,
-      })
-      .safeParse(latest);
-
-    if (!parsed.success) {
-      return (
-        <Failure
-          message={
-            "The stored assessment does not match its schema: " +
-            parsed.error.issues.map((issue) => issue.message).join("; ")
-          }
-        />
-      );
-    }
-
+  if (!finished) {
     return (
-      <Results
-        persona={parsed.data as Persona}
-        inventories={scoredInventoriesFrom(answers)}
-        version={assessments.length}
-        totalVersions={assessments.length}
-      />
+      <div className="flex flex-col gap-5">
+        <header>
+          <h1 className="text-2xl font-semibold">Assessment</h1>
+          <p className="mt-1 max-w-2xl text-sm opacity-70">
+            One question at a time. Every answer is saved as you give it, so you
+            can close this and come back to the same place.
+          </p>
+        </header>
+
+        <Interview
+          initial={{
+            progress: progressFrom(answers),
+            answered: answeredSummaries(answers),
+          }}
+        />
+      </div>
     );
   }
 
-  return (
-    <div className="flex flex-col gap-5">
-      <header>
-        <h1 className="text-2xl font-semibold">Assessment</h1>
-        <p className="mt-1 max-w-2xl text-sm opacity-70">
-          One question at a time. Every answer is saved as you give it, so you
-          can close this and come back to the same place.
-        </p>
-      </header>
+  const phase = await loadResultsPhase(supabase, user!.id, answers);
 
-      <Interview
-        initial={{
-          progress: progressFrom(answers),
-          answered: answeredSummaries(answers),
-        }}
-      />
-    </div>
+  if (phase.kind === "malformed") {
+    return <Failure message={phase.message} />;
+  }
+
+  if (phase.kind === "cogitating") {
+    return <Cogitating />;
+  }
+
+  if (phase.kind === "failed") {
+    return <GatewayFailure error={phase.error} />;
+  }
+
+  return (
+    <Results
+      persona={phase.persona}
+      inventories={phase.inventories}
+      version={phase.version}
+      totalVersions={phase.totalVersions}
+    />
   );
 }
 

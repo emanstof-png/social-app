@@ -19,6 +19,14 @@
  * recomputed from the stored raw answers on every read and nothing about a
  * result needs a database column of its own (spec 03, "Decisions made while
  * drafting").
+ *
+ * ABOUT-YOU IS STATIC (spec 03 rework addendum). The interview used to open
+ * with an LLM writing hobbies questions one at a time, then close with these
+ * five fixed constraint questions. Both are fixed text now, in one static
+ * section, and the model is called exactly once afterward -- to pick which
+ * inventories run in the phase below -- not per question. The five constraint
+ * questions keep their original wording verbatim: specs 05 and 06 filter on
+ * these answers, so what they mean has to stay stable across the rework.
  */
 
 /** Every item is a 1-5 agreement rating, so one response widget serves all. */
@@ -83,6 +91,90 @@ export type InventoryResult = {
 
 /** Raw responses, keyed by item id. */
 export type InventoryResponses = Record<string, number>;
+
+// -- About-you (spec 03 rework addendum) --------------------------------------
+
+export type AboutYouInputKind = "text" | "single_choice";
+
+export type AboutYouQuestion = {
+  key: string;
+  text: string;
+  help?: string;
+  inputKind: AboutYouInputKind;
+  choices?: string[];
+};
+
+/**
+ * The whole about-you section: static, instant, no LLM call. Order here is
+ * interview order. The last four keys (`budget` through `schedule`) are
+ * spec 03's original `CONSTRAINT_QUESTIONS`, moved here unchanged in wording
+ * and key so specs 05 and 06's filters keep working.
+ */
+export const ABOUT_YOU_QUESTIONS: readonly AboutYouQuestion[] = [
+  {
+    key: "hobby",
+    text: "Name one or two things you're into right now, hobby-wise -- or used to be.",
+    help: "Doesn't have to be impressive. Whatever you'd actually mention if someone asked.",
+    inputKind: "text",
+  },
+  {
+    key: "good_week",
+    text: "What does a good week look like for you, socially?",
+    inputKind: "text",
+  },
+  {
+    key: "current_environment",
+    text: "Think about the social environments you're actually in most right now -- work, family, whatever's regular. What are they like?",
+    inputKind: "text",
+  },
+  {
+    key: "desired_environment",
+    text: "Now the other direction: what do you want more of, socially, that you're not getting?",
+    inputKind: "text",
+  },
+  {
+    key: "budget",
+    text: "What can you comfortably spend on this in a typical month?",
+    help: "Plenty of good groups are free. This just stops us suggesting things you would resent paying for.",
+    inputKind: "single_choice",
+    choices: [
+      "Nothing — free events only",
+      "Up to about $25 a month",
+      "Up to about $50 a month",
+      "Up to about $100 a month",
+      "More than $100 a month",
+    ],
+  },
+  {
+    key: "sobriety",
+    text: "Does alcohol change whether a group suits you?",
+    inputKind: "single_choice",
+    choices: [
+      "I need alcohol-free settings",
+      "I would rather drinking was not the point",
+      "It makes no difference to me",
+      "I would rather a drink was on offer",
+    ],
+  },
+  {
+    key: "physical",
+    text: "Is there anything physical we should plan around — mobility, hearing, sight, energy, an injury?",
+    help: "Write “nothing” if there is nothing.",
+    inputKind: "text",
+  },
+  {
+    key: "location",
+    text: "Where should we look, and how far are you willing to travel?",
+    help: "A town or city and a rough radius or travel time is enough.",
+    inputKind: "text",
+  },
+  {
+    key: "schedule",
+    text: "When are you actually free?",
+    help: "Weeknights, weekend mornings, Tuesday lunchtimes — be as specific as you can.",
+    inputKind: "text",
+  },
+] as const;
 
 // -- The inventories ----------------------------------------------------------
 

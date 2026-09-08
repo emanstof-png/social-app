@@ -106,9 +106,30 @@ focus-set/activity join `app/(app)/communities/data.ts` uses — a scraped
 event stays visible until its own community is `archived` (a `cut`
 community's events still show, matching `partitionByArchived`'s existing
 precedent), regardless of whether the activity is still in the current focus
-set. Month navigation is a `?month=YYYY-MM` search param, not client state.
+set. `/calendar` has no `data.ts` or `actions.ts` of its own: it imports
+`loadFeedData` and the two select/unselect actions from `../feed/` directly,
+since it is a second presentation over the same read and actions, not a
+second read path. Month navigation is a `?month=YYYY-MM` search param, not
+client state.
 
 ## Calendar and community fields addendum (spec 07 addendum)
+
+**`/calendar` is committed-only; `/feed` is unchanged.** A live hand-test
+found `/calendar` still showing every scraped event, selected or not, the
+same as `/feed` — a second browse-and-pick surface PRD §2.5 originally
+called for but that does not scale once scraping produces hundreds of
+events. `lib/feed/occurrences.ts`'s `committedOnly` filters
+`loadFeedData`'s cards to `selections.status IN ('planned', 'attended')`
+before grouping; `app/(app)/calendar/page.tsx` applies it to both the
+Upcoming list and the month grid's day markers. `/feed` still reads
+`loadFeedData`'s cards directly, unfiltered.
+
+**Day click scrolls/highlights, never navigates.** Clicking a day in the
+month grid (`app/(app)/calendar/calendar-view.tsx`) scrolls the Upcoming
+list to that day's section if it has a committed entry. If it does not,
+`lib/feed/occurrences.ts`'s `nearestDay` finds the closest committed day and
+the page scrolls there instead, with a notice explaining why — a click
+never silently no-ops.
 
 **`communities.times_visited`/`rating`** (migration 0014) are two more
 user-owned fields, next to `status`/`focus`/`user_notes` on the Community
@@ -116,29 +137,7 @@ card, written independently through the same `updateCommunity` per-field
 patch. Both are manually editable now; spec 09's evaluation flow is what
 will later write them automatically from real attendance.
 
-## Feed/calendar merge and Saved confirmation fix (2026-09-08)
-
-Two fixes made directly against the spec-07-calendar-fields addendum above,
-outside the loop, after a live hand-test:
-
-**`/calendar` is gone; its grid lives inside `/feed` now.** The addendum
-above originally made `/calendar` committed-only specifically because it had
-become a second browse-and-pick surface duplicating `/feed` — PRD §2.5's own
-"non-feed selection view: calendar on the right, day-by-day feed on the
-left" never meant two separate pages. Folding the grid back into `/feed`
-(`app/(app)/feed/page.tsx`, `feed-view.tsx`) removes that duplication at the
-root instead of managing it with a second filtered view, so the
-committed-only distinction is gone along with the page it existed for: the
-grid's day markers and the day-click scroll target are `/feed`'s own full
-`byDay` — every scraped event in the window, matching the list right next to
-it. `lib/feed/occurrences.ts`'s `committedOnly` and `nearestDay` are
-untouched and still tested (`tests/feed-occurrences.test.ts`); `committedOnly`
-is simply unused by any page now. `app/(app)/calendar/page.tsx` is a
-`redirect()` to `/feed` (preserving `?month`) for old links; the "Calendar"
-entry in `app/(app)/nav-items.ts` is gone, leaving seven nav sections instead
-of eight. Day click scrolls/highlights, never navigates, exactly as the
-addendum designed it — only the target list changed from committed-only to
-everything.
+## Saved confirmation fix (2026-09-08)
 
 **Community card fields now confirm a write, not just fail one.** The
 times_visited/rating/status/focus/notes fields on the Community card
@@ -149,6 +148,14 @@ write that never fired. Each field now flashes a "✓ Saved" `role="status"`
 badge next to itself for two seconds after `updateCommunity` actually
 succeeds, tracked by which field just wrote (`savedField` state) rather than
 one shared flag, so editing one field never flashes another's badge.
+
+**A same-day attempt to also merge `/calendar` into `/feed` (PRD §2.5) was
+built, then reverted at Eric's request after review.** The addendum's
+committed-only design above, including `/calendar`'s own `data.ts`-free
+structure and its two-pane grid/Upcoming-list layout, stands as originally
+built — nothing about it changed. `git log` (commits `01e859d` and its
+revert) carries the full account for anyone who wants the reasoning that was
+tried and rejected.
 
 ## Environment (.env.local and Vercel)
 NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY,

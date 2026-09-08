@@ -1,0 +1,194 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+import { FEED_WINDOW_DAYS } from "@/lib/feed/budget";
+import { expandOccurrences, groupByDay } from "@/lib/feed/occurrences";
+import { eventRow, selectionRow, type EventType, type SelectionRow } from "@/lib/schemas";
+
+/**
+ * Reads for the Feed and Calendar pages (spec 07 item 3).
+ *
+ * DIRECTIVE-FREE ON PURPOSE (CLAUDE.md hard rule), the same reason
+ * app/(app)/communities/data.ts is: page.tsx is a server component and
+ * actions.ts is "use server", and a "use server" module may only export async
+ * functions, so shared reads cannot live there. /calendar has no data.ts of
+ * its own -- it imports loadFeedData from here directly (spec's own drafting
+ * decision).
+ */
+
+export type Db = SupabaseClient;
+
+export type FeedCard = {
+  eventId: string;
+  occurrenceAt: string;
+  startsAt: string;
+  endsAt: string | null;
+  title: string;
+  communityName: string;
+  location: string | null;
+  cost: string | null;
+  eventType: EventType;
+  recurrence: string | null;
+  sourceUrl: string | null;
+  rsvpUrl: string | null;
+  selection: SelectionRow | null;
+};
+
+export type FeedData = {
+  cards: FeedCard[];
+  byDay: { day: string; items: FeedCard[] }[];
+};
+
+/** An active event, as read for the feed join -- expandOccurrences only needs
+ * a structural subset of this (id, starts_at, ends_at, recurrence). */
+export type FeedSourceEvent = {
+  id: string;
+  community_id: string;
+  title: string;
+  starts_at: string;
+  ends_at: string | null;
+  location: string | null;
+  cost: string | null;
+  event_type: EventType;
+  source_url: string | null;
+  rsvp_url: string | null;
+  recurrence: string | null;
+  status: string;
+};
+
+/** All active events, oldest occurrence-source first (starts_at order). */
+export async function readEvents(supabase: Db, userId: string): Promise<FeedSourceEvent[]> {
+  const { data, error } = await supabase
+    .from("events")
+    .select(
+      "id, community_id, title, starts_at, ends_at, location, cost, event_type, " +
+        "source_url, rsvp_url, recurrence, status",
+    )
+    .eq("user_id", userId)
+    .eq("status", "active")
+    .order("starts_at", { ascending: true });
+
+  if (error) throw new Error(`Could not read your events: ${error.message}`);
+
+  return (data ?? []).map((row) =>
+    eventRow
+      .pick({
+        id: true,
+        community_id: true,
+        title: true,
+        starts_at: true,
+        ends_at: true,
+        location: true,
+        cost: true,
+        event_type: true,
+        source_url: true,
+        rsvp_url: true,
+        recurrence: true,
+        status: true,
+      })
+      .parse(row),
+  );
+}
+
+/**
+ * Every community the user owns, keyed by id. The Feed reads by
+ * community_id directly, not through the focus-set/activity join
+ * communities/data.ts uses -- a scraped event stays visible until its own
+ * community is archived, regardless of the activity's focus state (spec's
+ * own drafting decision).
+ */
+export async function readCommunitiesById(
+  supabase: Db,
+  userId: string,
+): Promise<Map<string, { name: string; status: string }>> {
+  const { data, error } = await supabase
+    .from("communities")
+    .select("id, name, status")
+    .eq("user_id", userId);
+
+  if (error) throw new Error(`Could not read your communities: ${error.message}`);
+
+  const byId = new Map<string, { name: string; status: string }>();
+  for (const row of data ?? []) {
+    byId.set(row.id as string, { name: row.name as string, status: row.status as string });
+  }
+  return byId;
+}
+
+/** Every selection for the user, keyed on `${event_id}:${occurrence_at}`. */
+export async function readSelections(
+  supabase: Db,
+  userId: string,
+): Promise<Map<string, SelectionRow>> {
+  const { data, error } = await supabase
+    .from("selections")
+    .select("id, user_id, event_id, occurrence_at, selected_at, gcal_event_id, status, created_at, updated_at")
+    .eq("user_id", userId);
+
+  if (error) throw new Error(`Could not read your selections: ${error.message}`);
+
+  const byKey = new Map<string, SelectionRow>();
+  for (const row of data ?? []) {
+    const parsed = selectionRow.parse(row);
+    byKey.set(`${parsed.event_id}:${parsed.occurrence_at}`, parsed);
+  }
+  return byKey;
+}
+
+/**
+ * Joins events, communities and selections into the Feed's cards: drops
+ * events whose community is archived or missing, expands each remaining
+ * event's recurrence over [now, now + FEED_WINDOW_DAYS days], and attaches
+ * the matching selection (or null). `now` is injected rather than read from
+ * Date.now() inside this function, so it stays a pure join over injected
+ * reads and a caller-supplied clock, testable without mocking global time.
+ */
+export async function loadFeedData(
+  supabase: Db,
+  userId: string,
+  { timezone, now }: { timezone: string; now: Date },
+): Promise<FeedData> {
+  const [events, communitiesById, selectionsByKey] = await Promise.all([
+    readEvents(supabase, userId),
+    readCommunitiesById(supabase, userId),
+    readSelections(supabase, userId),
+  ]);
+
+  const window = {
+    from: now,
+    to: new Date(now.getTime() + FEED_WINDOW_DAYS * 24 * 60 * 60 * 1000),
+  };
+
+  const cards: FeedCard[] = [];
+
+  for (const event of events) {
+    const community = communitiesById.get(event.community_id);
+    // Only archived communities are excluded; a `cut` one still shows its
+    // events, matching partitionByArchived's precedent
+    // (docs/specs/07-feed-and-calendar-views.md's drafting decision).
+    if (!community || community.status === "archived") continue;
+
+    const occurrences = expandOccurrences(event, window);
+
+    for (const occurrence of occurrences) {
+      cards.push({
+        eventId: occurrence.eventId,
+        occurrenceAt: occurrence.occurrenceAt,
+        startsAt: occurrence.startsAt,
+        endsAt: occurrence.endsAt,
+        title: event.title,
+        communityName: community.name,
+        location: event.location,
+        cost: event.cost,
+        eventType: event.event_type,
+        recurrence: event.recurrence,
+        sourceUrl: event.source_url,
+        rsvpUrl: event.rsvp_url,
+        selection: selectionsByKey.get(`${occurrence.eventId}:${occurrence.occurrenceAt}`) ?? null,
+      });
+    }
+  }
+
+  cards.sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+
+  return { cards, byDay: groupByDay(cards, timezone) };
+}

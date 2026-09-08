@@ -713,4 +713,24 @@ describe("insert schemas", () => {
       }),
     ).toThrow();
   });
+
+  it("requires occurrence_at on a selection, non-recurring included (spec 07 item 1)", () => {
+    const base = {
+      user_id: "22222222-2222-4222-8222-222222222222",
+      event_id: "33333333-3333-4333-8333-333333333333",
+    };
+    expect(() => schemas.selectionInsert.parse(base)).toThrow();
+    expect(
+      schemas.selectionInsert.parse({
+        ...base,
+        occurrence_at: "2026-09-13T19:00:00+00:00",
+      }),
+    ).toMatchObject({ occurrence_at: "2026-09-13T19:00:00+00:00" });
+  });
+
+  it("leaves occurrence_at optional on a selection update", () => {
+    expect(schemas.selectionUpdate.parse({ status: "attended" })).toMatchObject({
+      status: "attended",
+    });
+  });
 });

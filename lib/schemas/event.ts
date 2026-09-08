@@ -45,6 +45,10 @@ export const eventUpdate = eventInsert.omit({ user_id: true }).partial();
 export const selectionRow = timestampedRowBase.extend({
   event_id: uuid,
   selected_at: timestamptz,
+  /** The specific dated instance selected (spec 07 item 1) -- required on every
+   * row, including a non-recurring event's, where it equals that event's own
+   * starts_at. What lets one recurring event have more than one selection. */
+  occurrence_at: timestamptz,
   gcal_event_id: z.string().nullable(),
   status: selectionStatus,
 });

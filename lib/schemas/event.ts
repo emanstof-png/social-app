@@ -59,6 +59,11 @@ export const selectionRow = timestampedRowBase.extend({
   gcal_sync_status: runStatus.nullable(),
   gcal_sync_error_kind: runErrorKind.nullable(),
   gcal_sync_error_message: z.string().nullable(),
+  /** Spec 09 item 1 (migration 0017): stamped once an evaluation prompt has
+   * been attempted for this occurrence (sent, no subscription, or failed and
+   * logged), never cleared -- what keeps the daily cron idempotent. Null
+   * means never attempted. */
+  evaluation_prompted_at: timestamptz.nullable(),
   status: selectionStatus,
 });
 
@@ -70,6 +75,7 @@ export const selectionInsert = selectionRow
     gcal_sync_status: true,
     gcal_sync_error_kind: true,
     gcal_sync_error_message: true,
+    evaluation_prompted_at: true,
     status: true,
   });
 

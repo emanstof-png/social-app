@@ -146,7 +146,7 @@ export async function readCommunitiesById(
  * `Date#toISOString()`'s "...Z" form -- comparing the raw strings would never
  * match a real selection back to its occurrence.
  */
-function occurrenceKey(eventId: string, occurrenceAt: string): string {
+export function occurrenceKey(eventId: string, occurrenceAt: string): string {
   return `${eventId}:${new Date(occurrenceAt).toISOString()}`;
 }
 
@@ -160,7 +160,7 @@ export async function readSelections(
     .select(
       "id, user_id, event_id, occurrence_at, selected_at, gcal_event_id, " +
         "gcal_sync_status, gcal_sync_error_kind, gcal_sync_error_message, " +
-        "status, created_at, updated_at",
+        "evaluation_prompted_at, status, created_at, updated_at",
     )
     .eq("user_id", userId);
 

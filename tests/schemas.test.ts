@@ -44,6 +44,7 @@ const rowSchemas: Record<string, z.ZodObject> = {
   discovery_runs: schemas.discoveryRunRow,
   search_log: schemas.searchLogRow,
   google_accounts: schemas.googleAccountRow,
+  push_subscriptions: schemas.pushSubscriptionRow,
 };
 
 const enumSchemas: Record<string, z.ZodEnum<Record<string, string>>> = {
@@ -161,6 +162,7 @@ describe("row schemas reject bad data", () => {
     const evaluation = {
       ...base,
       event_id: "33333333-3333-4333-8333-333333333333",
+      occurrence_at: "2026-09-05T22:14:03.123456+00:00",
       attended: true,
       liked: true,
       connections_quality: 4,
@@ -858,6 +860,51 @@ describe("insert schemas", () => {
       access_token: "v1.iv.tag.ciphertext",
       refresh_token: "v1.iv.tag.ciphertext",
       token_expires_at: "2026-09-08T12:00:00+00:00",
+    });
+    expect(parsed).not.toHaveProperty("id");
+  });
+
+  it("requires occurrence_at on an evaluation insert (spec 09 item 1)", () => {
+    const base = {
+      user_id: "22222222-2222-4222-8222-222222222222",
+      event_id: "33333333-3333-4333-8333-333333333333",
+    };
+    expect(() => schemas.evaluationInsert.parse(base)).toThrow();
+    expect(
+      schemas.evaluationInsert.parse({
+        ...base,
+        occurrence_at: "2026-09-13T19:00:00+00:00",
+      }),
+    ).toMatchObject({ occurrence_at: "2026-09-13T19:00:00+00:00" });
+  });
+
+  it("leaves evaluation_prompted_at optional on a selection insert, defaulting to null (spec 09)", () => {
+    const parsed = schemas.selectionInsert.parse({
+      user_id: "22222222-2222-4222-8222-222222222222",
+      event_id: "33333333-3333-4333-8333-333333333333",
+      occurrence_at: "2026-09-13T19:00:00+00:00",
+    });
+    expect(parsed).not.toHaveProperty("evaluation_prompted_at");
+  });
+
+  it("accepts a full push_subscriptions row (spec 09 item 1)", () => {
+    const parsed = schemas.pushSubscriptionRow.parse({
+      id: "11111111-1111-4111-8111-111111111111",
+      user_id: "22222222-2222-4222-8222-222222222222",
+      endpoint: "https://fcm.googleapis.com/fcm/send/abc123",
+      p256dh_key: "BBase64UrlP256dhKey",
+      auth_key: "Base64UrlAuthKey",
+      created_at: "2026-09-08T11:00:00+00:00",
+    });
+    expect(parsed.endpoint).toBe("https://fcm.googleapis.com/fcm/send/abc123");
+  });
+
+  it("does not require database-generated columns on a push_subscriptions insert", () => {
+    const parsed = schemas.pushSubscriptionInsert.parse({
+      user_id: "22222222-2222-4222-8222-222222222222",
+      endpoint: "https://fcm.googleapis.com/fcm/send/abc123",
+      p256dh_key: "BBase64UrlP256dhKey",
+      auth_key: "Base64UrlAuthKey",
     });
     expect(parsed).not.toHaveProperty("id");
   });

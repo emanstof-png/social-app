@@ -7,6 +7,10 @@ const oneToFive = z.number().int().min(1).max(5);
 
 export const evaluationRow = timestampedRowBase.extend({
   event_id: uuid,
+  /** The specific dated instance this evaluation is for (spec 09 item 1,
+   * migration 0017) -- required on every row, the same occurrence-keyed
+   * shape selections.occurrence_at already has. */
+  occurrence_at: timestamptz,
   attended: z.boolean().nullable(),
   liked: z.boolean().nullable(),
   connections_quality: oneToFive.nullable(),

@@ -21,3 +21,12 @@ export const FEED_WINDOW_DAYS = 90;
  * Whichever limit (window, COUNT, UNTIL, or this) is reached first wins.
  */
 export const MAX_OCCURRENCES_PER_EVENT = 26;
+
+/**
+ * Spec 09 item 1. How far back the Evaluations page and the cron route look
+ * for a past, unevaluated occurrence before giving up on ever prompting for
+ * it -- a courtesy bound for the *pending* list only; an occurrence someone
+ * did answer stays in their own history regardless of age (spec's own
+ * drafting decision 9).
+ */
+export const EVALUATION_LOOKBACK_DAYS = 14;

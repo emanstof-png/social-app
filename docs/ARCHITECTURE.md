@@ -298,6 +298,27 @@ places a `spec-NN` tag — only a builder session that actually finished a
 spec does that. High-tier halts stay a human escalation via GitHub issue,
 exactly as for the builder.
 
+**Launching the manager** (`.claude/settings.manager.json`, committed).
+Start it as `claude --settings .claude/settings.manager.json` from the repo
+root — a plain `claude` session in this repo carries none of the manager's
+restrictions, since they live in this file, not in the `.claude/
+settings.json` the builder and reviewer run under. The file holds one thing:
+`Edit(app/**)`/`Edit(lib/**)`/`Edit(supabase/**)`/`Edit(e2e/**)`/
+`Edit(tests/**)`/`Edit(scripts/**)` deny rules enforcing "What you never
+touch" in `docs/agents/MANAGER.md`. A single `Edit(path)` deny rule is
+enough to cover both the Edit and Write tools on that path — Claude Code
+checks file-modification permission only against `Edit`/`Read` path rules,
+never `Write`, so a `Write(path)` rule would be silently ignored. Claude
+Code merges `permissions.deny` lists across settings sources rather than
+one replacing another, so this file's rules land on top of the project's
+own `.claude/settings.json` (still supplying its `npm run *`/`git *`
+allowlist and `acceptEdits` default) instead of needing to restate them.
+Deny rules always win outright over a matching allow from any source
+regardless of specificity, which is also why this file needs no exception
+for `loop.config.json`: that file sits at the repo root, outside every
+directory this file denies, so it was never going to be caught by these
+rules in the first place.
+
 **Permissions.** `.claude/settings.json` (committed) is the explicit allowlist an unattended
 `claude -p` session runs under, with `--permission-mode acceptEdits`, never
 `--dangerously-skip-permissions`: `npm run *`, `npx supabase *`, `npx tsx *`, `npx vitest *`,

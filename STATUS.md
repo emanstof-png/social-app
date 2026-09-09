@@ -32,14 +32,13 @@
 
 ## Next
 - **Action needed from Eric before spec 08 can be verified live (see the note at the top of this file):** the three Google Cloud Console steps (consent screen, redirect URIs, Vercel env vars) — `GOOGLE_CLIENT_ID`/`SECRET` are already in `.env.local`.
-- spec 09 evaluation-and-push (draft spec first) — see Backlog. `times_visited`/`rating` (spec 07 addendum) are the two fields it starts writing automatically.
 - **Action needed from Eric:** add `E2E_USER_ID` as a GitHub repository secret (value in the spec-06 item-0 commit message, or re-run `npm run setup:e2e-user`) — CI's Playwright job skips cleanly without it, same as the other four secrets, but the login/assessment/feed tests need it to run at all.
 - **Real fix still open:** buy OpenRouter credit, or find another confirmed-working free model, for the seven components currently stopgapped onto `gemini-3.6-flash` (see the note above). Until then every component shares one provider, so a bad afternoon on Gemini's free tier affects all of them at once. **Confirmed still biting the E2E_USER_ID account specifically** during the spec 03 rework addendum's live verification (2026-09-08): its `persona_synthesis` row still points at `minimax/minimax-m3:free`, which 404s. Re-seeding or hand-fixing that one account's `model_settings` would let the addendum's success path (not just its failure path) be observed live.
 - **Existing accounts' already-seeded `model_settings` rows were not touched by the default-model fix** — only new seeds get `gemini-3.6-flash`. Check `/settings` (or the table directly) for any account onboarded before 2026-09-07 that still carries `minimax/minimax-m3:free` or `z-ai/glm-5.2:free` on a component it actually uses.
 - 12a item 2: assessment test DONE (spec 04 item 6). Event selection DONE (spec 07 item 7, `e2e/feed.spec.ts`). Spec 05 deliberately adds no e2e suite — see its REVIEW.md.
 
 ## In Progress
-- (nothing in progress)
+- spec 09 evaluation-and-push — drafted at `docs/specs/09-evaluation-and-push.md`, build starting. `times_visited`/`rating` (spec 07 addendum) are the two fields it starts writing automatically.
 
 ## Blocked
 - (nothing blocking the next spec)

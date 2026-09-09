@@ -31,8 +31,7 @@
 - Read `docs/specs/dojo-and-practice-layer-note.md` before drafting spec 09 or spec 11 — a sharper problem statement and an unscoped "dojo" practice layer that may change what either spec is for.
 
 ## Next
-- **Action needed from Eric before spec 08 can be verified live (see the note at the top of this file):** the three Google Cloud Console steps (consent screen, redirect URIs, Vercel env vars) — `GOOGLE_CLIENT_ID`/`SECRET` are already in `.env.local`.
-- **Action needed from Eric:** add `E2E_USER_ID` as a GitHub repository secret (value in the spec-06 item-0 commit message, or re-run `npm run setup:e2e-user`) — CI's Playwright job skips cleanly without it, same as the other four secrets, but the login/assessment/feed tests need it to run at all.
+- [LOOP] spec 09 evaluation-and-push — item 3 (Web Push core) unblocked: `web-push`/`@types/web-push` are installed and `NEEDS_HUMAN.md` is resolved (see Done below); relaunch `scripts/run-spec.sh` to resume from this file's In Progress heading.
 - **Real fix still open:** buy OpenRouter credit, or find another confirmed-working free model, for the seven components currently stopgapped onto `gemini-3.6-flash` (see the note above). Until then every component shares one provider, so a bad afternoon on Gemini's free tier affects all of them at once. **Confirmed still biting the E2E_USER_ID account specifically** during the spec 03 rework addendum's live verification (2026-09-08): its `persona_synthesis` row still points at `minimax/minimax-m3:free`, which 404s. Re-seeding or hand-fixing that one account's `model_settings` would let the addendum's success path (not just its failure path) be observed live.
 - **Existing accounts' already-seeded `model_settings` rows were not touched by the default-model fix** — only new seeds get `gemini-3.6-flash`. Check `/settings` (or the table directly) for any account onboarded before 2026-09-07 that still carries `minimax/minimax-m3:free` or `z-ai/glm-5.2:free` on a component it actually uses.
 - 12a item 2: assessment test DONE (spec 04 item 6). Event selection DONE (spec 07 item 7, `e2e/feed.spec.ts`). Spec 05 deliberately adds no e2e suite — see its REVIEW.md.
@@ -42,6 +41,10 @@
 
 ## Blocked
 - (nothing blocking the next spec)
+
+## Waiting on Eric
+- **Action needed from Eric before spec 08 can be verified live (see the note at the top of this file):** the three Google Cloud Console steps (consent screen, redirect URIs, Vercel env vars) — `GOOGLE_CLIENT_ID`/`SECRET` are already in `.env.local`.
+- **Action needed from Eric:** add `E2E_USER_ID` as a GitHub repository secret (value in the spec-06 item-0 commit message, or re-run `npm run setup:e2e-user`) — CI's Playwright job skips cleanly without it, same as the other four secrets, but the login/assessment/feed tests need it to run at all.
 
 **Search keys: OBTAINED 2026-09-06.** All three are in `.env.local` and all three answered a live call before anything was built against them: `EXA_API_KEY`, `TAVILY_API_KEY`, `SERPER_API_KEY`. Eric reports them set in Vercel; **that has not been verified from this machine** — the deployed app cannot search if any is missing there, and spec 05's verification was done against a local `next start`. One click on the deployed `/communities` settles it. Not GitHub secrets: every spec 05 test is fixture-based with no network.
 

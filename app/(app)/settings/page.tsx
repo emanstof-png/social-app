@@ -1,4 +1,7 @@
+import { headers } from "next/headers";
+
 import { ABOUT_YOU_QUESTIONS } from "@/lib/assessments/catalogue";
+import { authorizeUrl, signState } from "@/lib/google/oauth";
 import { COMPONENTS, PROVIDERS } from "@/lib/llm/catalog";
 import {
   providerKeyStatus,
@@ -12,12 +15,24 @@ import { searchProviderStatus } from "@/lib/search/credentials";
 import type { LlmProvider } from "@/lib/schemas/enums";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { Dials, type DialField } from "./dials";
+import { GoogleCalendar } from "./google-calendar";
 import { ModelSettings } from "./model-settings";
 import { OnboardingStep } from "./onboarding-step";
 import { ProviderKeys, type KeyStatus } from "./provider-keys";
 import { RunLog, type RunLogEntry } from "./run-log";
 import { SearchLog, type SearchLogEntry } from "./search-log";
 import { SearchProviders } from "./search-providers";
+
+/** Vercel and every other real host set x-forwarded-proto; localhost never
+ * does, and is never https. No env var for this -- the request itself
+ * already knows, and a hardcoded deployed origin would break every preview
+ * deploy. */
+async function requestOrigin(): Promise<string> {
+  const list = await headers();
+  const host = list.get("host") ?? "localhost:3000";
+  const proto = list.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
+  return `${proto}://${host}`;
+}
 
 const DIAL_KEYS = ["budget", "sobriety", "physical", "location", "schedule"] as const;
 
@@ -41,7 +56,7 @@ export const metadata = { title: "Settings — gazelle" };
  */
 export const dynamic = "force-dynamic";
 
-export default async function SettingsPage() {
+export default async function SettingsPage({ searchParams }: PageProps<"/settings">) {
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
@@ -62,6 +77,7 @@ export default async function SettingsPage() {
     { data: runRows },
     { data: searchRows },
     { data: dialAnswerRows },
+    { data: googleAccountRow },
   ] = await Promise.all([
       supabase
         .from("model_settings")
@@ -105,6 +121,7 @@ export default async function SettingsPage() {
           "question_id",
           DIAL_KEYS.map((key) => `about_you:${key}`),
         ),
+      supabase.from("google_accounts").select("email").eq("user_id", user.id).maybeSingle(),
     ]);
 
   const settings = Object.fromEntries(
@@ -182,6 +199,27 @@ export default async function SettingsPage() {
     };
   });
 
+  // Google Calendar (spec 08 item 7). The one-line banner from the OAuth
+  // callback's redirect (app/auth/google/callback/route.ts) -- rendered
+  // once, then gone on the next navigation since this page is already
+  // dynamic = "force-dynamic".
+  const params = await searchParams;
+  const googleParam = Array.isArray(params.google) ? params.google[0] : params.google;
+  const googleMessageParam = Array.isArray(params.message) ? params.message[0] : params.message;
+  const googleBanner =
+    googleParam === "connected"
+      ? { tone: "connected" as const, message: "Google Calendar connected." }
+      : googleParam === "error"
+        ? { tone: "error" as const, message: googleMessageParam ?? "Could not connect Google Calendar." }
+        : null;
+
+  const origin = await requestOrigin();
+  const googleAuthorizeHref = authorizeUrl({
+    clientId: process.env.GOOGLE_CLIENT_ID ?? "",
+    redirectUri: `${origin}/auth/google/callback`,
+    state: signState(user.id, process.env.ENCRYPTION_KEY ?? ""),
+  });
+
   return (
     <div className="flex max-w-4xl flex-col gap-10">
       <header>
@@ -206,6 +244,22 @@ export default async function SettingsPage() {
           </p>
         </div>
         <ProviderKeys status={keyStatus} />
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <div>
+          <h2 className="text-lg font-medium">Google Calendar</h2>
+          <p className="mt-1 text-sm opacity-70">
+            Selecting an event on the Feed or Calendar adds it here once
+            connected; unselecting removes it.
+          </p>
+        </div>
+        <GoogleCalendar
+          connected={Boolean(googleAccountRow)}
+          email={(googleAccountRow?.email as string | undefined) ?? null}
+          authorizeHref={googleAuthorizeHref}
+          banner={googleBanner}
+        />
       </section>
 
       <section className="flex flex-col gap-3">

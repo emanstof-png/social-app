@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { FEED_WINDOW_DAYS } from "@/lib/feed/budget";
 import { expandOccurrences, groupByDay } from "@/lib/feed/occurrences";
+import type { CalendarSourceEvent } from "@/lib/google/calendar";
 import { eventRow, selectionRow, type EventType, type SelectionRow } from "@/lib/schemas";
 
 /**
@@ -156,7 +157,11 @@ export async function readSelections(
 ): Promise<Map<string, SelectionRow>> {
   const { data, error } = await supabase
     .from("selections")
-    .select("id, user_id, event_id, occurrence_at, selected_at, gcal_event_id, status, created_at, updated_at")
+    .select(
+      "id, user_id, event_id, occurrence_at, selected_at, gcal_event_id, " +
+        "gcal_sync_status, gcal_sync_error_kind, gcal_sync_error_message, " +
+        "status, created_at, updated_at",
+    )
     .eq("user_id", userId);
 
   if (error) throw new Error(`Could not read your selections: ${error.message}`);
@@ -227,4 +232,59 @@ export async function loadFeedData(
   cards.sort((a, b) => a.startsAt.localeCompare(b.startsAt));
 
   return { cards, byDay: groupByDay(cards, timezone) };
+}
+
+/**
+ * One event's data, shaped for lib/google/calendar.ts#eventBody (spec 08
+ * item 6) -- a single-row read rather than reusing loadFeedData's full join,
+ * since a Select/Unselect click only ever needs one event's facts, not the
+ * whole feed re-expanded.
+ *
+ * `occurrenceAt` stands in for the event's own `starts_at`: a recurring
+ * event's `starts_at`/`ends_at` describe only its first occurrence, and the
+ * specific instance the user selected is what belongs on their calendar.
+ * The duration is recomputed from the event's own start/end gap and applied
+ * to `occurrenceAt`, the same offset-preserving arithmetic
+ * expandOccurrences (lib/feed/occurrences.ts) already uses.
+ */
+export async function readEventForSync(
+  supabase: Db,
+  userId: string,
+  eventId: string,
+  occurrenceAt: string,
+): Promise<CalendarSourceEvent | null> {
+  const { data: event, error } = await supabase
+    .from("events")
+    .select("title, location, cost, source_url, starts_at, ends_at, community_id")
+    .eq("user_id", userId)
+    .eq("id", eventId)
+    .maybeSingle();
+
+  if (error) throw new Error(`Could not read that event: ${error.message}`);
+  if (!event) return null;
+
+  const { data: community, error: communityError } = await supabase
+    .from("communities")
+    .select("name")
+    .eq("user_id", userId)
+    .eq("id", event.community_id as string)
+    .maybeSingle();
+
+  if (communityError) throw new Error(`Could not read that community: ${communityError.message}`);
+
+  const startsAt = new Date(event.starts_at as string).getTime();
+  const endsAt = event.ends_at as string | null;
+  const durationMs = endsAt ? new Date(endsAt).getTime() - startsAt : null;
+  const occurrenceEndsAt =
+    durationMs !== null ? new Date(new Date(occurrenceAt).getTime() + durationMs).toISOString() : null;
+
+  return {
+    title: event.title as string,
+    location: event.location as string | null,
+    cost: event.cost as string | null,
+    communityName: (community?.name as string | undefined) ?? "your community",
+    sourceUrl: event.source_url as string | null,
+    startsAt: occurrenceAt,
+    endsAt: occurrenceEndsAt,
+  };
 }

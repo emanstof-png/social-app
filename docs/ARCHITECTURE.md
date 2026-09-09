@@ -17,7 +17,8 @@
 - `discovery_runs` — activity_id, location, status (running | complete | failed | empty), rounds_done, searches_used, pages_read, communities_found, empty_rounds, last_error, started_at, finished_at. One row per discovery run; a run advances one round per request, so this is also what makes an interrupted run resumable (spec 05).
 - `search_log` — provider (exa | tavily | serper), query, discovery_run_id, result_count, status, error_kind, error_message, latency_ms. One row per search API call, successful or not, so a fall-through is visible rather than inferred. Separate from `run_log` because a search call has no tokens, no cost and no output schema, and does have a query and a result count (spec 05).
 - `events` — community_id, title, starts_at, ends_at, location, address, cost, event_type (community_event | community_general | one_off), source_url, rsvp_url, recurrence, registration_required, capacity, scraped_at, dedupe_hash (unique).
-- `selections` — event_id, occurrence_at (spec 07: the specific dated instance selected, required on every row including a non-recurring event's, where it equals that event's own starts_at), selected_at, gcal_event_id, status (planned | attended | skipped). Unique on (user_id, event_id, occurrence_at), widened from (user_id, event_id) in migration 0012 so one recurring event can have more than one independently-selected occurrence.
+- `selections` — event_id, occurrence_at (spec 07: the specific dated instance selected, required on every row including a non-recurring event's, where it equals that event's own starts_at), selected_at, gcal_event_id, status (planned | attended | skipped). Unique on (user_id, event_id, occurrence_at), widened from (user_id, event_id) in migration 0012 so one recurring event can have more than one independently-selected occurrence. From spec 08 (migration 0015): gcal_sync_status/gcal_sync_error_kind/gcal_sync_error_message, reusing run_status/run_error_kind verbatim — null on all three means Google Calendar was never connected when this row was last written, not a failure.
+- `google_accounts` — one connected Google account per user (spec 08, migration 0015): email, access_token and refresh_token (ciphertext via encryptSecret, the same scheme provider_keys.key uses), token_expires_at. Deletable, not status-over-delete, same as provider_keys.
 - `evaluations` — event_id, attended, liked, connections_quality (1-5), culture_notes, ease_of_meeting (1-5), answered_at.
 - `preference_log` — entity_type (genre | community | venue), entity_id/name, liked (bool), note, logged_at.
 - `contacts` — name, phone, email, met_at_event_id, met_at_community_id, met_on, notes, phone_contact_id (nullable).
@@ -157,6 +158,47 @@ built — nothing about it changed. `git log` (commits `01e859d` and its
 revert) carries the full account for anyone who wants the reasoning that was
 tried and rejected.
 
+## Google Calendar sync (spec 08)
+
+**One connection, synced synchronously on the same explicit action that
+already writes `selections`.** `lib/google/oauth.ts`/`oauth-server.ts` (the
+consent URL, the CSRF `state` token, the code exchange and refresh) and
+`calendar.ts`/`calendar-server.ts` (the event body, create/delete against
+the real Calendar API) follow the same pure/impure pair split as
+`gateway`/`chain`/`round`. `selectOccurrence`/`unselectOccurrence`
+(`app/(app)/feed/actions.ts`) call the Calendar API inline, in the same
+request that writes the `selections` row, rather than in an `after()`
+callback: a single external POST is no different in shape from every other
+single-write action this app already awaits directly, and deferring it would
+need a pending state and a poll for no real benefit. A 401 gets exactly one
+refresh-and-retry, the same "one corrective retry, then raise" shape the
+gateway uses for an invalid model reply.
+
+**No sync is attempted, and nothing is shown as failed, until an account is
+connected.** `selections.gcal_sync_status` stays null for every selection
+made before Google Calendar is connected — marking all of them `error` for
+not having opted into a feature yet would be noise, not a failure. Once
+connected, a real failure (rate limit, a revoked refresh token, a timeout)
+writes the real message to `gcal_sync_error_message` and shows a Retry
+control on the card (`retryGoogleSync`); the local `selections` row is never
+rolled back over a sync failure, matching CLAUDE.md's "the app only
+prepares." Unselecting deletes the Google event first, best-effort — the
+local delete always proceeds regardless of whether the remote one
+succeeded, and Google's own 404/410 for an already-gone event counts as
+success, not a failure.
+
+**Two-way sync is out of scope.** This spec never reads a change made
+directly in Google back into the app; PRD §2.4–2.5 only ever describe the
+app writing to Google on an explicit Select/Unselect. One account, one
+calendar (`primary`) — no calendar picker.
+
+**Live verification needs Eric.** Every non-live path (no account
+connected; a connected-but-invalid account, exercised against Google's real
+API with deterministically-rejected credentials) is covered by
+`e2e/feed.spec.ts` against a real production server. The one thing that
+cannot be scripted is a real OAuth consent grant and a real write appearing
+on a real calendar — see `REVIEW.md` for exactly what is and is not done.
+
 ## Environment (.env.local and Vercel)
 NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY,
 ANTHROPIC_API_KEY (optional), OPENROUTER_API_KEY, GROQ_API_KEY (optional), GEMINI_API_KEY (optional),
@@ -173,11 +215,19 @@ none of them — every test in spec 05 runs against recorded fixtures with no ne
 
 **Loop-only variables (spec 13).** `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD` and
 `GH_TOKEN` live in `.env.local` on the machine running the build loop and nowhere else —
-never Vercel, never GitHub repository secrets. `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`
-and `NEXT_PUBLIC_VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY` are spec 08 and spec 09
-prerequisites pulled forward into spec 13's own prerequisites table so those specs do not
-halt on them; they go in `.env.local` and Vercel (Production and Preview) once specs 08/09
-actually use them.
+never Vercel, never GitHub repository secrets. `NEXT_PUBLIC_VAPID_PUBLIC_KEY`/
+`VAPID_PRIVATE_KEY` are spec 09's prerequisite, pulled forward into spec 13's own
+prerequisites table so that spec does not halt on it; they go in `.env.local` and Vercel
+(Production and Preview) once spec 09 actually uses them.
+
+**`GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` (spec 08) are in `.env.local`, in active use.**
+Still open: the Google Cloud OAuth consent screen (scoped to
+`https://www.googleapis.com/auth/calendar.events`, Eric's account added as a test user),
+two Authorized redirect URIs (`http://localhost:3000/auth/google/callback` and the deployed
+domain's own), and adding both variables to Vercel (Production and Preview) — all three are
+Eric's to do, per `docs/specs/08-google-calendar-sync.md`'s own prerequisites, and only the
+spec's final live hand-test needs them; everything else was built and verified without real
+Google credentials.
 
 **Migration runner (spec 13 item 1).** The Supabase CLI (`supabase`, a dev dependency) is
 linked to project `wqawpwbgrsjusbdopgbi` via `SUPABASE_ACCESS_TOKEN` and

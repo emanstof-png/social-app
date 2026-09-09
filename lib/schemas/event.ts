@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { timestampedRowBase, timestamptz, uuid } from "./common";
 import { eventType, recordStatus, selectionStatus } from "./enums";
+import { runErrorKind, runStatus } from "./llm";
 
 export const eventRow = timestampedRowBase.extend({
   community_id: uuid,
@@ -41,7 +42,10 @@ export const eventInsert = eventRow
 
 export const eventUpdate = eventInsert.omit({ user_id: true }).partial();
 
-/** An event the user chose to attend; gcal_event_id is filled by spec 08. */
+/** An event the user chose to attend. gcal_event_id and the three
+ * gcal_sync_* fields are spec 08's: null on all four means Google Calendar
+ * was never connected when this row was last written, not a failure
+ * (docs/specs/08-google-calendar-sync.md decisions). */
 export const selectionRow = timestampedRowBase.extend({
   event_id: uuid,
   selected_at: timestamptz,
@@ -50,12 +54,24 @@ export const selectionRow = timestampedRowBase.extend({
    * starts_at. What lets one recurring event have more than one selection. */
   occurrence_at: timestamptz,
   gcal_event_id: z.string().nullable(),
+  /** Reuses run_status/run_error_kind verbatim (migration 0005), the same
+   * choice search_log already made. */
+  gcal_sync_status: runStatus.nullable(),
+  gcal_sync_error_kind: runErrorKind.nullable(),
+  gcal_sync_error_message: z.string().nullable(),
   status: selectionStatus,
 });
 
 export const selectionInsert = selectionRow
   .omit({ id: true, created_at: true, updated_at: true })
-  .partial({ selected_at: true, gcal_event_id: true, status: true });
+  .partial({
+    selected_at: true,
+    gcal_event_id: true,
+    gcal_sync_status: true,
+    gcal_sync_error_kind: true,
+    gcal_sync_error_message: true,
+    status: true,
+  });
 
 export const selectionUpdate = selectionInsert.omit({ user_id: true }).partial();
 

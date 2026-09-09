@@ -11,13 +11,13 @@ Paste ONE at a time. Each spec file in docs/specs/ has scope, acceptance criteri
 | 05 | community-discovery | PRD §2.1–2.2 (deep-research protocol, communities record w/ editable status) | Sonnet (Opus if research quality poor) | 1–2 |
 | 06 | calendar-scraping | PRD §2.3 (ics/api/html → events, scheduled job, dedupe, attach to groups) | Sonnet | 2 |
 | 07 | feed-and-calendar-views | PRD §2.4–2.6 (cards feed, day/calendar selection view, event typing) | Sonnet | 1–2 |
-| 08 | google-calendar-sync | PRD §2.4 (OAuth, add on select, two-way) | Sonnet (Opus for OAuth debugging) | 1–2 |
+| 08 | google-calendar-sync (`docs/specs/08-google-calendar-sync.md`) | PRD §2.4–2.5 (OAuth, add on select) | Sonnet (Opus for OAuth debugging) | 1–2 |
 | 09 | evaluation-and-push | PRD §3.1–3.4, 3.7 (web push, post-event questionnaire, return-to marking, preference log, dynamic surfacing) | Sonnet | 2 |
 | 10 | crm | PRD §4.1–4.3, 4.5 (contacts, import, met-where, tallies, compose-and-send via phone) | Sonnet | 1–2 |
 | 11 | weekly-planning-and-invites | PRD §3.5–3.6, §4.4, 4.6 (weekly plan from feed, ongoing discovery job, invite suggestions, group-invite suggestion) | Sonnet | 1–2 |
 
 ## Actual build order so far
-`00 → 01 → 02 → 12a (pulled forward) → 03 → 04 → 05 → 06 → 13 (pulled forward) → 07 → 03-rework (addendum) → 07-calendar-fields (addendum)`. The table above is the plan; this is what was run.
+`00 → 01 → 02 → 12a (pulled forward) → 03 → 04 → 05 → 06 → 13 (pulled forward) → 07 → 03-rework (addendum) → 07-calendar-fields (addendum) → saved-confirmation-fix → 08`. The table above is the plan; this is what was run.
 
 **Spec 04 was re-drafted before it was built.** The original one-page sketch
 (`04-activities-and-focus.md`, written before specs 01–03 existed) was replaced
@@ -88,9 +88,34 @@ so a click never silently no-ops; `communities` (migration 0014) gains
 Community card today, next to `status`. See `STATUS.md`'s Done entry for
 the full verification account.
 
-Next is spec 08 — Google Calendar sync. `selections` rows now exist and
-`gcal_event_id` sits ready and unused on every one of them; spec 07's
-REVIEW.md names which rows need a real sync once OAuth exists.
+**Saved-confirmation fix finished on 2026-09-08, no new tag**, built directly
+in the manager's own session from a direct instruction (not a spec file), on
+top of `spec-07-calendar-fields`. The Community card's autosaved fields
+(status, times visited, rating, focus, notes) now flash a "✓ Saved"
+`role="status"` badge next to whichever field just wrote successfully — a
+success used to be silent. A same-session attempt to also merge `/calendar`
+into `/feed` as one page (PRD §2.5) was built, then fully reverted at Eric's
+request after review; `/calendar` stands exactly as `spec-07-calendar-fields`
+built it. See `STATUS.md`'s Done entry for the full account, including the
+named deviation and its revert.
+
+**Spec 08 — Google Calendar sync — finished on 2026-09-08 (tag `spec-08`)**,
+drafted and built directly in the manager's own session (not the loop) from
+`docs/specs/08-google-calendar-sync.md`, no addendum. `google_accounts`
+(migration 0015) holds one encrypted OAuth connection per user, reusing
+`lib/llm/crypto.ts`'s `encryptSecret`/`decryptSecret` rather than a second
+implementation; `selections` gains three sync-status columns reusing
+`run_status`/`run_error_kind` verbatim, the same choice `search_log` already
+made. `lib/google/oauth.ts`/`oauth-server.ts` and `calendar.ts`/
+`calendar-server.ts` follow the pure/impure pair pattern `gateway`/`chain`/
+`round` already established; `app/auth/google/callback/route.ts` mirrors the
+existing Supabase callback's shape. Selecting an occurrence now syncs to
+Google Calendar synchronously (not backgrounded) when an account is
+connected, with no sync attempted or shown as failed when one is not;
+unselecting deletes the Google event as the necessary inverse. **Not yet
+verified live**: the spec's own required real-OAuth hand test needs three
+Google Cloud prerequisites only Eric can complete (consent screen, redirect
+URIs, Vercel env vars) — see `STATUS.md`'s Done entry and `REVIEW.md`.
 
 ## Addenda waiting for the specs that have not been drafted yet
 Two decisions were settled during spec 02 that change what specs 05 and 06 must say. Read the addendum **before** drafting either spec; each one overrides the one-line description in the table above.

@@ -43,6 +43,7 @@ const rowSchemas: Record<string, z.ZodObject> = {
   run_log: schemas.runLogRow,
   discovery_runs: schemas.discoveryRunRow,
   search_log: schemas.searchLogRow,
+  google_accounts: schemas.googleAccountRow,
 };
 
 const enumSchemas: Record<string, z.ZodEnum<Record<string, string>>> = {
@@ -814,5 +815,50 @@ describe("insert schemas", () => {
     expect(schemas.selectionUpdate.parse({ status: "attended" })).toMatchObject({
       status: "attended",
     });
+  });
+
+  it("leaves the three gcal_sync_* fields optional on a selection insert, defaulting to null (spec 08)", () => {
+    const parsed = schemas.selectionInsert.parse({
+      user_id: "22222222-2222-4222-8222-222222222222",
+      event_id: "33333333-3333-4333-8333-333333333333",
+      occurrence_at: "2026-09-13T19:00:00+00:00",
+    });
+    expect(parsed).not.toHaveProperty("gcal_sync_status");
+  });
+
+  it("rejects a gcal_sync_status outside run_status's two labels (spec 08)", () => {
+    expect(() =>
+      schemas.selectionInsert.parse({
+        user_id: "22222222-2222-4222-8222-222222222222",
+        event_id: "33333333-3333-4333-8333-333333333333",
+        occurrence_at: "2026-09-13T19:00:00+00:00",
+        gcal_sync_status: "pending",
+      }),
+    ).toThrow();
+  });
+
+  it("accepts a full google_accounts row (spec 08)", () => {
+    const parsed = schemas.googleAccountRow.parse({
+      id: "11111111-1111-4111-8111-111111111111",
+      user_id: "22222222-2222-4222-8222-222222222222",
+      email: "eric@example.com",
+      access_token: "v1.iv.tag.ciphertext",
+      refresh_token: "v1.iv.tag.ciphertext",
+      token_expires_at: "2026-09-08T12:00:00+00:00",
+      created_at: "2026-09-08T11:00:00+00:00",
+      updated_at: "2026-09-08T11:00:00+00:00",
+    });
+    expect(parsed.email).toBe("eric@example.com");
+  });
+
+  it("does not require database-generated columns on a google_accounts insert", () => {
+    const parsed = schemas.googleAccountInsert.parse({
+      user_id: "22222222-2222-4222-8222-222222222222",
+      email: "eric@example.com",
+      access_token: "v1.iv.tag.ciphertext",
+      refresh_token: "v1.iv.tag.ciphertext",
+      token_expires_at: "2026-09-08T12:00:00+00:00",
+    });
+    expect(parsed).not.toHaveProperty("id");
   });
 });

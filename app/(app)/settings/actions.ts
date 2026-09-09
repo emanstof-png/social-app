@@ -7,6 +7,8 @@ import { suggestActivities } from "@/app/(app)/activities/actions";
 import { readActivities, readProfile as readActivitiesProfile } from "@/app/(app)/activities/data";
 import { advanceDiscovery } from "@/app/(app)/communities/actions";
 import { focusState } from "@/lib/activities/plan";
+import { serverCalendarDepsFor } from "@/lib/google/calendar-server";
+import { refreshAccessToken } from "@/lib/google/oauth-server";
 import { providerMeta } from "@/lib/llm/catalog";
 import { componentDefinition } from "@/lib/llm/components";
 import { encryptSecret } from "@/lib/llm/crypto";
@@ -517,6 +519,58 @@ export async function findMoreCommunitiesFromSettings(): Promise<ActionResult> {
       ok: true,
       message: `Advanced discovery for ${focus.length} focused ${focus.length === 1 ? "activity" : "activities"}.`,
     };
+  } catch (cause) {
+    return fail(cause);
+  }
+}
+
+// -- Google Calendar (spec 08 item 7) ------------------------------------------
+
+/**
+ * Deletes the google_accounts row outright -- like provider_keys, this is
+ * credential data the user disconnects, not user content status-over-delete
+ * protects (docs/specs/08-google-calendar-sync.md decisions). Does not touch
+ * events already on Google Calendar; only an explicit Unselect ever removes
+ * one (spec's own out-of-scope: no bulk reconciliation on disconnect).
+ */
+export async function disconnectGoogleCalendar(): Promise<ActionResult> {
+  try {
+    const { supabase, userId } = await currentUserId();
+    const { error } = await supabase.from("google_accounts").delete().eq("user_id", userId);
+    if (error) throw new Error(error.message);
+
+    revalidatePath("/settings");
+    return { ok: true, message: "Disconnected." };
+  } catch (cause) {
+    return fail(cause);
+  }
+}
+
+/**
+ * A real call, the same reason ModelSettings' own Test button makes one
+ * rather than trusting a cached "connected" flag: a refresh_token can be
+ * revoked on Google's side without this app ever finding out until it
+ * tries to use it.
+ */
+export async function checkGoogleConnection(): Promise<ActionResult> {
+  try {
+    const { supabase, userId } = await currentUserId();
+    const deps = await serverCalendarDepsFor(supabase, userId);
+    const oauthDeps = {
+      fetch: deps.fetch,
+      clientId: deps.clientId,
+      clientSecret: deps.clientSecret,
+    };
+    const refreshed = await refreshAccessToken(oauthDeps, deps.refreshToken);
+    await supabase
+      .from("google_accounts")
+      .update({
+        access_token: encryptSecret(refreshed.accessToken),
+        token_expires_at: refreshed.expiresAt,
+      })
+      .eq("user_id", userId);
+
+    return { ok: true, message: "Connected." };
   } catch (cause) {
     return fail(cause);
   }

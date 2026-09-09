@@ -1,6 +1,8 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { expect, test } from "@playwright/test";
 
+import { encryptSecret } from "../lib/llm/crypto";
+
 /**
  * Spec 07 item 7 -- event selection, end to end, against a production build.
  * The half of spec 12a item 2 left deferred ("Event-selection still
@@ -471,6 +473,60 @@ test.describe("feed", () => {
     // lib/feed/ functions tests/feed-occurrences.test.ts already covers.
     await expect(page.getByText(FIXTURE_CUT_TITLE)).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText(FIXTURE_ARCHIVED_TITLE)).toHaveCount(0);
+  });
+
+  test("selecting with a connected-but-invalid Google account saves the plan and shows a real sync failure with Retry (spec 08)", async ({
+    page,
+  }) => {
+    // A genuinely invalid access/refresh token pair: Google's real API
+    // rejects it deterministically (401, then a failed refresh), so this
+    // exercises the real HTTP path with no live user consent needed. The
+    // one thing this cannot cover -- a real account's tokens actually
+    // working -- is the spec's own required live hand-test.
+    const { error: seedError } = await admin.from("google_accounts").insert({
+      user_id: userId,
+      email: "e2e-invalid@example.com",
+      access_token: encryptSecret("invalid-test-access-token"),
+      refresh_token: encryptSecret("invalid-test-refresh-token"),
+      token_expires_at: new Date(Date.now() + 3600_000).toISOString(),
+    });
+    expect(seedError).toBeNull();
+
+    try {
+      await page.reload();
+      await expect(page.getByText(FIXTURE_TITLE)).toBeVisible({ timeout: 20_000 });
+      const card = page.locator("article", { hasText: FIXTURE_TITLE });
+      await card.getByRole("button", { name: "Select" }).click();
+
+      // The local plan is saved regardless of the sync outcome.
+      await expect(card.getByRole("button", { name: "Added" })).toBeVisible({ timeout: 20_000 });
+
+      // A real sync failure is visible on the card, with a Retry control.
+      const retry = card.getByRole("button", { name: "Retry" });
+      await expect(retry).toBeVisible({ timeout: 20_000 });
+
+      await expect
+        .poll(
+          async () => {
+            const { data } = await admin
+              .from("selections")
+              .select("gcal_sync_status, gcal_event_id")
+              .eq("user_id", userId)
+              .eq("event_id", FIXTURE_EVENT_ID)
+              .maybeSingle();
+            return data?.gcal_sync_status;
+          },
+          { message: "gcal_sync_status must be 'error', not left null or 'ok'", timeout: 5_000 },
+        )
+        .toBe("error");
+
+      // Retry re-attempts against the same real, still-invalid credentials
+      // and fails the same deterministic way -- not a no-op.
+      await retry.click();
+      await expect(card.getByRole("alert")).toBeVisible({ timeout: 20_000 });
+    } finally {
+      await admin.from("google_accounts").delete().eq("user_id", userId);
+    }
   });
 
   test("an unselected event shows on /feed but not /calendar; selecting it makes it appear on /calendar too (spec 07 addendum: calendar-and-community-fields)", async ({

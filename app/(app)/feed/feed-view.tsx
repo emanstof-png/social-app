@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 
-import { selectOccurrence, unselectOccurrence } from "./actions";
+import { retryGoogleSync, selectOccurrence, unselectOccurrence } from "./actions";
 import type { FeedCard } from "./data";
 import { EVENT_TYPE_LABELS, dayLabel, type ActionResult } from "./view";
 
@@ -71,6 +71,13 @@ function Card({ card, timezone }: { card: FeedCard; timezone: string }) {
     });
   }
 
+  function retrySync() {
+    setResult(null);
+    startTransition(async () => {
+      setResult(await retryGoogleSync(card.eventId, card.occurrenceAt));
+    });
+  }
+
   const time = new Intl.DateTimeFormat("en-US", {
     hour: "numeric",
     minute: "2-digit",
@@ -134,6 +141,28 @@ function Card({ card, timezone }: { card: FeedCard; timezone: string }) {
           {pending ? "Saving…" : selected ? "Added" : "Select"}
         </button>
       </div>
+
+      {/* Persistent, from the stored selection -- survives a reload, unlike
+          the transient result below (spec 08 item 8). Null means never
+          attempted (no Google account connected), not a failure. */}
+      {selected && card.selection?.gcal_sync_status === "ok" ? (
+        <p className="text-xs text-green-700 dark:text-green-400">Synced to Google Calendar.</p>
+      ) : null}
+      {selected && card.selection?.gcal_sync_status === "error" ? (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-red-700 dark:text-red-400">
+          <span>
+            Could not sync to Google Calendar: {card.selection.gcal_sync_error_message}
+          </span>
+          <button
+            type="button"
+            onClick={retrySync}
+            disabled={pending}
+            className="rounded border border-current px-2 py-1 text-[10px] disabled:opacity-50"
+          >
+            {pending ? "…" : "Retry"}
+          </button>
+        </div>
+      ) : null}
 
       {result && !result.ok ? (
         <p role="alert" className="text-xs text-red-700 dark:text-red-400">

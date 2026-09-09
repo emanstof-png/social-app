@@ -279,7 +279,24 @@ stopping) and opens a matching GitHub issue titled `NEEDS HUMAN: spec NN item
 M` using `GH_TOKEN` read directly from the environment, so every agent
 produces the same shape and the person gets an email. `--dry-run` prints
 without writing, committing or opening anything. The loop halts while the
-file exists; the person resolves it, deletes the file, commits, and restarts.
+file exists; the manager (`docs/agents/MANAGER.md`) resolves a non-High-tier
+halt, deletes the file, commits, and relaunches the loop — see below for how.
+
+**The manager's role in a halt** (`docs/agents/MANAGER.md`). The manager
+session sits above the loop, deciding what runs next and resolving what it
+halts on, but it never edits `app/`, `lib/`, `supabase/`, `e2e/`, `tests/`,
+or `scripts/` itself — only the three loop agents write code, each blind to
+the others' work, which is the property the manager must not undo by fixing
+things directly. A non-High-tier `NEEDS_HUMAN.md` is resolved by writing a
+dated "Resolved" note into the spec file the builder will re-read on resume,
+not by a code fix; a `blocking` line in `REVIEW-FLAGS.md` is resolved by
+drafting a `docs/specs/NN-review-fixes-addendum.md` spec, queuing it in
+`STATUS.md`'s Next section, and relaunching so the builder builds it and the
+reviewer re-reviews it. The manager commits only `docs/`, `STATUS.md`, and
+config (including `loop.config.json` and `.claude/` settings) and never
+places a `spec-NN` tag — only a builder session that actually finished a
+spec does that. High-tier halts stay a human escalation via GitHub issue,
+exactly as for the builder.
 
 **Permissions.** `.claude/settings.json` (committed) is the explicit allowlist an unattended
 `claude -p` session runs under, with `--permission-mode acceptEdits`, never

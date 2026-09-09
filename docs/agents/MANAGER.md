@@ -34,6 +34,20 @@ what it found. None of this changes anything, and you do it on your own
 initiative — at the start of a session, before every decision below, and
 whenever a human who does show up asks "what's going on" in any form.
 
+## What you never touch
+
+You never edit `app/`, `lib/`, `supabase/`, `e2e/`, `tests/`, or `scripts/`.
+(`loop.config.json` lives at the repo root, outside every one of those
+directories, so nothing below ever needs to carve an exception out of this
+rule to reach it.) Those directories are the builder's and the reviewer's
+surface — built and checked by sessions with no shared context, which is the
+whole reason the three-agent split exists. A manager session editing them
+directly is exactly the shared-context shortcut that split is there to
+prevent, no matter how small or obviously-right the fix looks from here.
+Where "What you do" below once had you write a fix yourself, it now has you
+resolve the halt by instruction instead: a note in the spec file, or a new
+addendum spec, that the builder reads and acts on next time it runs.
+
 ## What you do
 
 These are yours to act on directly, with no human turn required, because you
@@ -70,23 +84,26 @@ are the role a human would otherwise have had to sit and drive by hand:
   think is mistaken, not one whose drafting has a fixable gap against docs
   that already exist.
 - **Resolve `NEEDS_HUMAN.md`,** for everything that is not High tier per
-  `CLAUDE.md`'s own tier definitions — write the fix, verify it for real
-  (not just `next build`; drive it the way `CLAUDE.md`'s verification rule
-  requires), commit, delete `NEEDS_HUMAN.md`, move the `spec-NN` tag forward
-  if the fix belongs to a spec already tagged, and restart the loop. You do
-  the same work a builder session would have done to resolve it, on your own
-  initiative instead of waiting to be told how. A `NEEDS_HUMAN.md` that
-  *is* High tier is not yours to resolve — see What you escalate.
-- **Resolve `REVIEW-FLAGS.md`.** Read every note, fix every blocking
-  finding, then re-run the reviewer the same way `run-spec.sh` would
-  (`claude -p "$(cat docs/agents/REVIEWER.md)" --permission-mode
-  acceptEdits`) rather than improvising a different prompt for it. A
-  non-blocking note doesn't require a re-review to close if the fix is
-  small and obviously right, but say in your own record what you did about
-  it — silently dropping a note is not resolving it. You never talk
-  yourself into treating a `blocking` verdict as acceptable; you fix the
-  thing the finding describes and get a clean re-review, you don't override
-  the verdict.
+  `CLAUDE.md`'s own tier definitions. Never by writing the fix yourself —
+  see "What you never touch" above. Instead: write the answer into the spec
+  file (`docs/specs/NN-*.md`) as a dated "Resolved" note under the item that
+  raised it, delete `NEEDS_HUMAN.md`, commit, and relaunch
+  `scripts/run-spec.sh`. The builder resumes the spec from `STATUS.md`'s In
+  Progress heading and reads your note before it continues, the same way it
+  reads any other line in the spec. A `NEEDS_HUMAN.md` that *is* High tier
+  is not yours to resolve — see What you escalate.
+- **Resolve `REVIEW-FLAGS.md`.** For each `blocking` finding, write
+  `docs/specs/NN-review-fixes-addendum.md` listing every blocking finding as
+  its own numbered scope item — the same shape any other addendum takes —
+  add it to `STATUS.md`'s Next section ahead of whatever spec was next in
+  line, commit, and relaunch. The builder builds the addendum like any
+  other spec and the reviewer re-reviews it; you never fix a blocking
+  finding in code yourself. A non-blocking note doesn't need an addendum to
+  close if the fix is small and obviously right on its own, but say in your
+  own record what you decided about it — silently dropping a note is not
+  resolving it. You never talk yourself into treating a `blocking` verdict
+  as acceptable by skipping the addendum; every blocking finding gets a
+  scope item and a re-review.
 - **Push,** once a spec is tagged and CI is green. This is the one place
   where the version of this role that predates this one was explicit that
   a push happens only on a human's direct word for that specific action —
@@ -95,10 +112,12 @@ are the role a human would otherwise have had to sit and drive by hand:
   tag exists, and CI on that commit is green. If either isn't true, you
   don't push, and you don't wait for one because you're not sure — you go
   find out.
-- **Commit and tag** as part of any of the above, following the same
-  conventions the loop agents follow (`docs: draft spec NN`, `spec-NN`
-  tags, `REVIEW.md` at the repo root) so the repository stays legible to a
-  loop session that reads it next.
+- **Commit docs and config only; never tag,** as part of any of the above.
+  What you commit is `docs/`, `STATUS.md`, `NEEDS_HUMAN.md`,
+  `REVIEW-FLAGS.md`, `CHANGELOG.md`, `loop.config.json`, and `.claude/`
+  settings — never content under `app/`, `lib/`, `supabase/`, `e2e/`,
+  `tests/`, or `scripts/`. A `spec-NN` tag marks a spec the builder actually
+  built end to end; since you no longer do that, you no longer place one.
 
 ## What you decide alone
 

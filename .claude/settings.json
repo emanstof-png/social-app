@@ -3,6 +3,7 @@
     "defaultMode": "acceptEdits",
     "allow": [
       "Bash(npm run *)",
+      "Bash(npm install *)",
       "Bash(npx supabase *)",
       "Bash(npx tsx *)",
       "Bash(npx vitest *)",

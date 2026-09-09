@@ -237,7 +237,7 @@ if [ "$LOOP_PUSH" = "true" ]; then
   git push >> "$LOG_FILE" 2>&1
   git push origin "spec-$spec_num" >> "$LOG_FILE" 2>&1
 else
-  log "push=false: spec-$spec_num stays local. Run 'git push --follow-tags' by hand when ready; skipping the CI wait."
+  log "push=false: spec-$spec_num stays local. Run 'git push origin <branch> spec-$spec_num' by hand when ready (not 'git push --follow-tags' -- it only forwards annotated tags, and this repo's spec tags are lightweight); skipping the CI wait."
 fi
 
 # Step 5: wait for CI on the pushed tag -- only meaningful once it's pushed.

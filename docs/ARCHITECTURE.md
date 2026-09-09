@@ -336,8 +336,12 @@ A `tests/loop-config.test.ts` suite covers the merge precedence and dryRun's for
   `spec-NN` tag to origin and waits on CI. The builder agent never pushes itself — see the note
   in `docs/agents/BUILDER.md` — so this one field, read only by `run-spec.sh`, is the single
   place that decision is made. `false` leaves everything local; push it yourself with
-  `git push --follow-tags` once you've read `REVIEW.md`. The reviewer still runs against the
-  local tag either way.
+  `git push origin <branch> spec-NN` once you've read `REVIEW.md` -- explicit, not
+  `git push --follow-tags`, which only forwards *annotated* tags and silently leaves the branch
+  pushed with the tag still missing from origin, since every `spec-NN` tag in this repo is
+  lightweight (a real defect found the hard way in the spec-08 session: `spec-08` sat off origin
+  after exactly that command until pushed explicitly). The reviewer still runs against the local
+  tag either way.
 - **`haltBeforeMigration`** (default `true`): a spec needing a new migration file writes
   `NEEDS_HUMAN.md` instead of the builder running `npm run migrate` itself. `false` restores the
   original spec 13 behavior (apply automatically, per CLAUDE.md's Medium-tier rule).

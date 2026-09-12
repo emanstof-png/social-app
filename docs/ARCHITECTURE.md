@@ -199,6 +199,112 @@ API with deterministically-rejected credentials) is covered by
 cannot be scripted is a real OAuth consent grant and a real write appearing
 on a real calendar — see `REVIEW.md` for exactly what is and is not done.
 
+## Evaluation and push (spec 09)
+
+**No new LLM component.** Asking whether someone went, whether they liked
+it, and updating a status by a fixed rule are all deterministic — PRD
+§3.1–3.4 and 3.7 need no model call, so this spec adds nothing to the
+component→model table.
+
+**One page, one write path, reusing every existing per-field pattern.**
+`app/(app)/evaluations/data.ts#loadPendingEvaluations` mirrors
+`loadFeedData`'s join (`readEvents`/`readCommunitiesById`/`readSelections`/
+`occurrenceKey`, all imported from `../feed/data`) but windows
+`expandOccurrences` backward — `EVALUATION_LOOKBACK_DAYS` (14) — instead of
+forward, keeping only a `'planned'` selection with no `evaluations` row yet
+at that exact occurrence. `submitEvaluation` (`actions.ts`) writes, in
+order: the `evaluations` row itself (upserted on `(user_id, event_id,
+occurrence_at)`); the matching `selections.status` flip to `'attended'` or
+`'skipped'` (spec 07's own reserved enum values); then, only when attended,
+`times_visited: current + 1` always (a visit is a visit) and `status:
+'returning'` only when the community was `'todo'`/`'went_once'` and the
+visit was liked — both through `updateCommunity`'s existing per-field patch,
+not new column-update code — and two `preference_log` rows (`community`,
+`genre`) when attended, none when not. `rating` stays fully manual (spec
+07 addendum); only `times_visited` and `status` ever move automatically, and
+`status` only ever moves forward along the path a person would have clicked
+themselves.
+
+**The confirmation UI has to survive its own revalidation.** A submitted
+`PendingCard` sets local `done` state to render a "saved, thanks!"
+`role="status"` message — but `submitEvaluation`'s own
+`revalidatePath("/evaluations")` re-renders the server parent with a
+`pending` list that no longer includes the just-answered occurrence, and
+mapping over that prop live would unmount the card (and its `done` state
+with it) before anyone sees the confirmation, a production-only race no
+unit test catches — the same family of bug as spec 04's stale-double-read
+and spec 07's occurrence-key mismatch. `EvaluationsView` now freezes its
+render list with `useState(() => pending)` at mount rather than resyncing
+from the prop, so an answered card stays mounted and visibly confirmed for
+the rest of that page visit; the next real navigation reads the server's
+current (now-excluding) list. Found and fixed via the required real
+`next start` e2e run, not by `next build` or the unit suite.
+
+**Web Push is a real dependency (`web-push`), pre-approved in the spec
+itself** — RFC 8291/8292's AES128GCM payload encryption and VAPID JWT
+signing are a cryptographic primitive, not a text grammar the rest of this
+codebase would normally hand-roll. `lib/push/notification.ts` (pure) builds
+the payload; `lib/push/webpush-server.ts` (impure, `PushDeps` matching
+`GatewayDeps`/`GoogleOAuthDeps`'s shape) sends it, reporting a 404/410 back
+as `{ dead: true }` rather than throwing — the same "already gone" shape
+`deleteCalendarEvent` uses for Google, applied to "this subscription is
+dead." `push_subscriptions` (migration 0016) is deletable, not
+status-over-delete, the same call `google_accounts` already made: it is
+device/connection data, not user content.
+
+**The cron route authenticates itself; the session gate lets it through.**
+`app/api/cron/evaluation-prompts/route.ts` checks `Authorization: Bearer
+$CRON_SECRET` directly — Vercel's own invocation carries no Supabase
+session at all, so `lib/supabase/proxy.ts#PUBLIC_PATHS` gained `/api/cron`
+or the session gate would 307 every real invocation to `/login` and the job
+would silently never run. `selections.evaluation_prompted_at` (migration
+0017) is the one-way idempotency marker — the same role
+`calendar_kind_checked_at` plays for "don't re-probe every load" — stamped
+once an attempt was made (sent, no subscription, or a logged failure),
+never cleared, which is what makes `vercel.json`'s once-daily schedule safe
+to tighten later with no other code at risk. `lib/supabase/admin.ts` is the
+first application route (as opposed to a script or an e2e test) to need a
+service-role client, since the cron route has no user session to scope a
+query by — banner-commented, only ever called from a route with its own
+independent authorization check.
+
+**The dynamic surfacing hint is a read, not a trigger.** `/settings` shows
+"Liked N of M recent visits" next to the existing "Find more communities"
+button once at least two genre-typed `preference_log` rows exist for that
+focused activity (`lib/settings/community-hints.ts#communityHint`, a plain
+count, no model call) — PRD §3.6's ongoing/unattended discovery stays spec
+11's job; this spec never triggers `advanceDiscovery` on its own.
+
+**Three things gate live verification, all named in the spec's own
+Prerequisites table.** `NEXT_PUBLIC_VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`
+are in `.env.local` and in active use — item 3's Settings UI and item 5's
+cron route both build and pass their own required tests against them
+locally. `CRON_SECRET` is not yet set anywhere, so the cron route's
+negative path (missing/wrong header → 401) is verified live but the
+"correct header actually authenticates and stamps a row" half is written
+and ready (`e2e/cron-evaluation-prompts.spec.ts`) but skips itself until
+Eric sets a real value in `.env.local` and Vercel — he has to know the
+value himself to add it to Vercel, so this is not something a build session
+can do on his behalf. Separately, and not something *any* value of
+`CRON_SECRET` fixes: `e2e/settings-push.spec.ts`'s real-subscribe test
+cannot complete in this repository's Playwright setup at all. Two isolated
+diagnostics (outside the app entirely — a bare `pushManager.subscribe()`
+call against `/offline`) narrowed the cause: Playwright's default browser
+context is always Chromium's incognito mode, which does not implement the
+Push API at all (`crbug.com/41124656`, confirmed via the browser's own
+console message); switching to a persistent (non-incognito) context clears
+that restriction but then fails with "push service not available" — the
+open-source Chromium binary Playwright bundles ships with no Google API
+key, so it cannot complete the real GCM registration step regardless of
+context type or network reachability (a plain `fetch` to `fcm.googleapis.com`
+from this same machine succeeds, ruling out a network-access explanation).
+This is a property of Playwright's bundled Chromium, not of this build
+session's environment, this app's code, or the test's own correctness — it
+would very likely reproduce identically in CI or on Eric's machine unless
+the suite were reconfigured to drive a real installed Chrome (`channel:
+"chrome"`), a cross-cutting Playwright config change affecting every e2e
+test, not something this one item's scope covers. See `REVIEW.md`.
+
 ## Environment (.env.local and Vercel)
 NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY,
 ANTHROPIC_API_KEY (optional), OPENROUTER_API_KEY, GROQ_API_KEY (optional), GEMINI_API_KEY (optional),

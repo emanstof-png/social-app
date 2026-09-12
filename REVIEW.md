@@ -1,152 +1,205 @@
-# REVIEW — spec 08: Google Calendar sync
+# REVIEW — spec 09: Evaluation and push
 
-Built 2026-09-08 directly in the manager's interactive session (per
-`docs/agents/MANAGER.md`), from `docs/specs/08-google-calendar-sync.md`,
-approved at its own review gate the same day. No addendum. Tag `spec-08`,
-**not pushed** — held per Eric's instruction pending his review and the
-three Google Cloud Console steps below.
+Built 2026-09-12 by the loop (`npm run loop`/`loop:once`), from
+`docs/specs/09-evaluation-and-push.md`. No addendum. Tag `spec-09`, **not
+pushed** — `loop.config.json`'s `push` is `false`; run `git push origin
+main spec-09` once this is read.
+
+This session resumed a build already in progress: items 1–2 (migrations
+0016/0017, the Evaluations page) were committed by an earlier session in
+this same spec; items 3–6 (Web Push core, the Settings subscribe UI, the
+service worker, the cron endpoint, the dynamic surfacing hint) were written
+but uncommitted when this session started, along with a real bug this
+session found and fixed while running the required live verification (see
+below). Everything was reviewed line by line, verified together, and is
+committed as one spec.
 
 ---
 
 ## What was built
 
-All eight scope items from the spec, in order:
+All six scope items from the spec, in order:
 
-1. **Tables.** Migration 0015: `google_accounts` (one connected account per
-   user — email, encrypted access/refresh tokens, expiry; deletable RLS the
-   same shape `provider_keys` already has) and three nullable columns on
-   `selections` (`gcal_sync_status`/`gcal_sync_error_kind`/
-   `gcal_sync_error_message`), reusing `run_status`/`run_error_kind`
-   verbatim rather than a new enum or a new log table.
-2. **`lib/google/oauth.ts`** (pure) — the consent URL (always
-   `access_type=offline`+`prompt=consent`, so a reconnect can never end up
-   with no way to refresh) and a signed, ten-minute `state` token (HMAC over
-   `ENCRYPTION_KEY`, no new secret) as the CSRF guard.
-3. **`lib/google/oauth-server.ts`** (impure) — code exchange, token
-   refresh, and fetching the connected email, all against a
-   `GoogleOAuthDeps` (`{ fetch, clientId, clientSecret }`) so every path is
-   tested with no network.
-4. **`app/auth/google/callback/route.ts`** — mirrors the existing Supabase
-   auth callback's shape exactly, including its `failure(message)` →
-   redirect-with-query-string pattern.
-5. **`lib/google/calendar.ts`/`calendar-server.ts`** — the event body and
-   the real create/delete calls, with exactly one refresh-and-retry on a
-   401 (the gateway's own "one corrective retry, then raise" shape, applied
-   to an expired token instead of an invalid model reply). Deleting an
-   already-gone event (404/410) counts as success.
-6. **Wired into `app/(app)/feed/actions.ts`.** No connected account: sync
-   columns stay null, no error shown, spec 07's own behavior otherwise
-   unchanged. Connected: syncs synchronously in the same request, never
-   rolling back the local write on a sync failure. `retryGoogleSync` added.
-   `app/(app)/feed/data.ts` gained `readEventForSync`, which recomputes a
-   recurring event's *specific occurrence* start/end rather than reusing
-   its first occurrence's `starts_at`/`ends_at`.
-7. **Settings.** Connect (a plain link, no server action needed), the
-   connected email, Disconnect (a real delete), and a "Check connection"
-   button that makes a real call rather than trusting a cached flag.
-8. **Card UI.** `feed-view.tsx`'s `Card` and `calendar-view.tsx`'s
-   `MiniCard` show the persistent sync state (synced / failed-with-Retry /
-   nothing when never attempted), driven by the stored row, not the
-   action's own transient result.
+1. **Migrations and schemas.** `0016_push_subscriptions.sql`
+   (`push_subscriptions`: `endpoint`/`p256dh_key`/`auth_key`, unique on
+   `(user_id, endpoint)`, deletable RLS) and
+   `0017_evaluation_occurrence_and_prompts.sql` (`evaluations.occurrence_at`,
+   a widened unique key, `selections.evaluation_prompted_at`). Applied via
+   `npm run migrate`, confirmed via `migrate:status` (0001–0017 all
+   applied). `lib/schemas/push.ts` added; `evaluation.ts`/`event.ts`
+   extended; `lib/feed/budget.ts` gained `EVALUATION_LOOKBACK_DAYS = 14`.
+2. **The Evaluations page.** `app/(app)/evaluations/` replaces the
+   placeholder with the spec 04/05 five-file shape. `data.ts` reuses
+   `loadFeedData`'s join machinery with a backward-windowed
+   `expandOccurrences` call; `actions.ts#submitEvaluation` is the one write
+   path PRD §3.1–3.4/3.7 needs, reusing `updateCommunity`'s existing
+   per-field pattern for the community side rather than new column-update
+   code.
+3. **Web Push core and the Settings subscribe/unsubscribe UI.** `web-push`
+   added as a runtime dependency (pre-approved in the spec itself).
+   `lib/push/notification.ts` (pure) builds the payload;
+   `lib/push/webpush-server.ts` (impure, `PushDeps` matching
+   `GatewayDeps`/`GoogleOAuthDeps`'s shape) sends it, reporting a 404/410 as
+   `{ dead: true }`. `app/(app)/settings/push.tsx` drives the real browser
+   `PushManager`; `subscribeToPush`/`unsubscribeFromPush`
+   (`settings/actions.ts`) upsert/delete the row.
+4. **Service worker push handling.** `public/sw.js` gained `push` (shows
+   the notification) and `notificationclick` (focuses an existing
+   `/evaluations` tab or opens one) listeners — plain service-worker APIs,
+   no new dependency.
+5. **The cron endpoint.** `lib/supabase/admin.ts` (new, service-role,
+   banner-commented) plus `app/api/cron/evaluation-prompts/route.ts`:
+   `CRON_SECRET`-gated, reads every user's pending-and-unprompted
+   evaluations, sends a push per subscription, deletes dead subscriptions,
+   stamps `evaluation_prompted_at` regardless of outcome so nothing is
+   re-notified forever. `lib/supabase/proxy.ts#PUBLIC_PATHS` gained
+   `/api/cron` (decision 3 — the route authenticates itself; the session
+   gate would otherwise redirect Vercel's own invocation to `/login`).
+   `vercel.json` schedules it once daily.
+6. **Dynamic surfacing hint.** `lib/settings/community-hints.ts` (pure) plus
+   a read in `settings/page.tsx`: "Liked N of M recent visits" next to the
+   existing "Find more communities" button once at least two genre-typed
+   `preference_log` rows exist for that focused activity. No new server
+   action, no automatic trigger (decision 8) — spec 11's territory stays
+   spec 11's.
 
-## A deviation from the drafted spec, decided during the build
+## A real bug found and fixed during required live verification
 
-Item 3's `GoogleOAuthDeps` and item 5's `CalendarDeps` bundle `clientId`/
-`clientSecret` directly into the deps object, rather than keeping them
-separate from `{ fetch }` the way the spec described. There is exactly one
-OAuth provider here (unlike the LLM gateway, generic over several), so
-there was nothing to gain from separating "how to authenticate" from "how
-to connect" — flagging it because the spec said otherwise, even though the
-result is simpler, not more complex.
+`e2e/evaluations.spec.ts`'s two tests failed against a real production
+`next start` server, not against `next build` or the unit suite — the same
+category of finding specs 04 and 07 each hit once for the same reason: a
+behavior that only exists once Next's own request/render lifecycle is real.
 
-## How to test it by hand
-
-**Without a connected account (works right now):**
-1. On `/feed`, select an event. It behaves exactly as before spec 08 —
-   "Added" button, no sync-related text anywhere on the card.
-2. On `/settings`, the new "Google Calendar" section shows a "Connect
-   Google Calendar" link and nothing else.
-
-**With a connected-but-invalid account (also works right now, seeded
-directly — this is what `e2e/feed.spec.ts`'s new test drives):**
-1. Insert a `google_accounts` row for your user with garbage
-   `access_token`/`refresh_token` (encrypted via `encryptSecret`).
-2. Select an event on `/feed`. The card still shows "Added" (the local
-   plan always saves), plus a real failure message and a Retry button.
-3. Click Retry — it fails again, the same deterministic way, and the
-   failure updates rather than duplicating.
-4. Delete the fixture `google_accounts` row when done.
-
-**With a real connected account — needs the three Google Cloud steps below
-first:**
-1. On `/settings`, click "Connect Google Calendar," complete Google's
-   consent screen, land back on `/settings` showing your email and a
-   "connected" banner.
-2. Select a real event on `/feed`. Confirm a real event appears on your
-   real Google Calendar with the right title, time and location.
-3. Unselect it. Confirm it disappears from your real Google Calendar.
-4. Click "Check connection" — confirm it reports success.
-5. Click "Disconnect" — confirm the section returns to "Connect Google
-   Calendar," and the event from step 2 (if not already unselected) is left
-   alone on your real calendar, untouched.
+**The submitted card's "saved, thanks!" confirmation never appeared**, even
+though every underlying write succeeded (confirmed independently with the
+admin client — the History list below it already showed the answered
+entry). `PendingCard` sets local `done` state on a successful submit to
+render its own `role="status"` confirmation, but `submitEvaluation`'s own
+`revalidatePath("/evaluations")` re-renders the page's server parent with a
+`pending` array that no longer includes the just-answered occurrence (it
+now has an `evaluations` row). `EvaluationsView` was mapping `PendingCard`s
+directly over that live prop, so the revalidation unmounted the very card
+holding the confirmation state before the browser (or the test) ever
+rendered it. Fixed by freezing `EvaluationsView`'s render list with
+`useState(() => pending)` at mount instead of resyncing from the prop on
+every re-render — an answered card now stays mounted and visibly confirmed
+for the rest of that page visit; a fresh navigation reads the server's
+current, correctly-shrunk list. `docs/ARCHITECTURE.md`'s new spec 09
+section has the same account.
 
 ## What I was unsure about
 
-- Whether a sync failure should block the local Select entirely or always
-  let it through with the failure surfaced separately. I read CLAUDE.md's
-  "the app only prepares" as being about not *sending without an explicit
-  action*, not about making the local plan hostage to a downstream
-  integration succeeding — so the local write always wins. If that reads
-  differently from what you intended, it is a contained change (the order
-  of operations in `selectOccurrence`/`unselectOccurrence`).
-- The exact wording Google uses for a revoked-refresh-token failure is an
-  HTTP 400 with `invalid_grant`, which `kindForStatus` maps to
-  `provider_error`, not `auth` — technically accurate to what Google
-  actually returns, but the more useful *user-facing* signal would be
-  "reconnect your account." I left it as the honest low-level
-  classification rather than special-casing the response body text, since
-  that felt like it was reaching past what the reused enum was meant to
-  cover. Worth a second look once a real revoked-token case is seen live.
-- Whether Settings needed a rollup view ("N sync failures this week"), the
-  way other subsystems get a log-table view (`CONVENTIONS.md#settings-is-
-  the-operator-surface`). I did not build one — the per-row status already
-  shows on every affected card, and a new log-like view felt like scope the
-  spec itself never asked for. Flagging it since the convention's own
-  phrasing ("plus a view over its log table") could be read either way.
+- **`e2e/settings-push.spec.ts`'s real-subscribe test cannot complete in
+  this repository's current Playwright setup, in any environment, not just
+  this one.** Two isolated diagnostics (a bare `pushManager.subscribe()`
+  call against `/offline`, outside the app entirely) found two stacked
+  causes: Playwright's default browser context is always Chromium's
+  incognito mode, which does not implement the Push API at all
+  (`crbug.com/41124656`, confirmed via the browser's own console message);
+  switching to a persistent context clears that restriction but then fails
+  with "push service not available" because the open-source Chromium
+  binary Playwright bundles carries no Google API key, so it cannot
+  complete real GCM registration regardless of context type — confirmed not
+  a network problem, since a plain `fetch` to `fcm.googleapis.com` from
+  this same machine succeeds. Fixing this for real means driving a real
+  installed Chrome (`channel: "chrome"`) instead of the bundled Chromium, a
+  Playwright config change affecting every e2e test in the suite, not
+  something this one item's scope covers on its own — flagging it here
+  rather than making that call unilaterally. The test itself, and the app
+  code it drives, are both correct; I did not change either to force a
+  pass. Recommend: either accept this as a permanent gap in the automated
+  suite (verify by hand in a real, non-incognito browser at `/settings`
+  instead — genuinely works there, since the OS's own Chrome/Safari/Firefox
+  are not Playwright's bundled binary), or decide separately whether the
+  whole suite should move to `channel: "chrome"`.
+- **`CRON_SECRET` is still unset**, so `e2e/cron-evaluation-prompts.spec.ts`'s
+  success-path test (correct header → stamps a row, deletes a dead
+  subscription) is written and skips itself rather than failing — the same
+  self-skip shape `tests/live-gateway.test.ts` already uses. Only Eric can
+  set the real value (he needs to know it to also add it to Vercel), so the
+  builder session cannot close this itself. The negative path (missing/wrong
+  header → 401) is verified live.
+- Whether the "Liked N of M" hint should read across *all* history rather
+  than the newest five — the spec is explicit about "newest five," so I did
+  not second-guess it, but flagging that this reads as a snapshot rather
+  than a lifetime record if that distinction ever matters to Eric.
 
 ## What the next spec needs
 
-- **Spec 09** (evaluation, weekly planning, push) is unaffected by anything
-  here beyond what `docs/specs/08-google-calendar-sync.md`'s own
-  Out-of-scope already named. `NEXT_PUBLIC_VAPID_PUBLIC_KEY`/
-  `VAPID_PRIVATE_KEY` are its prerequisite, not this spec's.
-- **Two-way sync was deliberately not built** (see the spec's own
-  Decisions) — if a future spec needs to read a change made directly in
-  Google back into the app, that is new scope, not something partially
-  here already.
-- **A calendar picker** (anything other than `primary`) is a real,
-  separable feature if it's ever wanted.
+- **Spec 10** (CRM) and **spec 11** (weekly planning, unattended discovery)
+  are unaffected by anything here beyond what the spec's own Out-of-scope
+  already named. Spec 11 is where PRD §3.6's ongoing/unattended discovery
+  belongs — this spec's hint is read-only on purpose.
+- **`communities.rating` still has no automatic derivation** (decision 7,
+  left manual on purpose) — a real candidate once enough evaluations exist
+  to judge an aggregate against.
+- **The Playwright browser-channel question above** is worth a real
+  decision before spec 10 or 11 add their own e2e coverage, so the gap
+  doesn't quietly repeat.
+
+## How to test it by hand
+
+**Evaluation flow (works right now):**
+1. Select an event on `/feed` whose occurrence is in the past (or seed one
+   directly, as `e2e/evaluations.spec.ts` does).
+2. Visit `/evaluations`. It appears under Pending.
+3. Click it open, answer "Yes, I went" / "Yes, I liked it", optionally rate
+   connections/ease of meeting, add notes, Submit. A "saved, thanks!"
+   confirmation appears in place.
+4. On `/communities`, the matching community's `times_visited` is one
+   higher and its status advanced to "returning" if it was "todo" or
+   "went_once".
+5. Reload `/evaluations` — the entry now appears under History, not
+   Pending.
+
+**Push (works in a real, non-incognito browser — not in this repo's
+Playwright suite, see above):**
+1. On `/settings`, click "Enable push notifications," grant the browser
+   permission prompt. The section shows "Enabled on this device."
+2. Confirm a `push_subscriptions` row exists for your user (admin client or
+   direct query).
+3. Click "Disable." The row is gone.
+
+**Cron (negative path works now; positive path needs `CRON_SECRET` set):**
+1. `curl <deployed-or-local-url>/api/cron/evaluation-prompts` with no
+   header, or the wrong one → `401`, nothing changes.
+2. Once `CRON_SECRET` is set in `.env.local` and Vercel: seed a past,
+   unprompted `selections` row and a `push_subscriptions` row, then `curl`
+   with `Authorization: Bearer $CRON_SECRET` → `200`,
+   `evaluation_prompted_at` stamped, a real push sent (or a dead
+   subscription deleted).
 
 ## Verification
 
 Per `CLAUDE.md`: `next build` passing is not "verified." Both `next build`
 and a real production `next start` server serving real authenticated
-requests were done — the full `npm run test:e2e` suite (14/14: login,
-assessment ×2, communities ×2, feed ×9 including the new Google-sync
-failure test) passed against that server and the real database, and a
-direct authenticated check confirmed `/settings` renders a correctly-formed
-Google authorize link and `/auth/google/callback` redirects with the right
-error banner on a malformed request. `npm run lint`, `npm run typecheck`,
-and `npm test` (585 unit tests) are all green. Migration 0015 is applied to
-the real project (`npm run migrate`, confirmed via `migrate:status`:
-0001–0015 all applied).
+requests were done. `npm run lint`, `npm run typecheck`, and `npm run test`
+(599 unit tests, 4 skipped) are all green. Migrations 0016–0017 are applied
+to the real project (`npm run migrate`, confirmed via `migrate:status`:
+0001–0017 all applied).
 
-**Not done: the spec's own required live hand-test with a real connected
-account.** This needs three things only Eric can do in Google Cloud
-Console — confirm the OAuth consent screen (scoped to
-`calendar.events`, his account added as a test user), register two
-Authorized redirect URIs (`http://localhost:3000/auth/google/callback` and
-the deployed domain's own), and add `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`
-to Vercel (Production and Preview). `GOOGLE_CLIENT_ID`/`SECRET` are already
-in `.env.local`, so nothing else blocks starting. Once those three are
-done, the "with a real connected account" section above is the test to run.
+The full `npm run test:e2e` suite: **18 passed, 1 failed, 1 skipped** (20
+total). The failure (`e2e/settings-push.spec.ts`) and the skip
+(`e2e/cron-evaluation-prompts.spec.ts`'s positive-header case) are both
+accounted for above — neither is an app defect. Everything else, including
+every path this spec added that a headless browser *can* actually exercise,
+passed against the real database:
+
+- **Item 2 (evaluation writes):** `e2e/evaluations.spec.ts`, both cases,
+  against a real production server — a real past selection seeded directly,
+  a real submission driven through the UI, and all four write targets
+  (`evaluations`, `selections`, `communities`, `preference_log`) read back
+  with the admin client, not inferred from the UI.
+- **Item 5 (cron route):** `e2e/cron-evaluation-prompts.spec.ts`'s two
+  negative-path cases (missing header, wrong header) both return `401` and
+  change nothing, verified against the real production server. The positive
+  path is written and ready; it skips itself until `CRON_SECRET` exists (see
+  above).
+- **Item 3 (push UI):** unit-tested in full
+  (`tests/push-notification.test.ts`, `tests/webpush-server.test.ts`) with
+  no network; the live browser-driven subscribe/unsubscribe round trip
+  could not be exercised by this suite for the Playwright-specific reasons
+  above, not verified live in this session.
+- **Item 6 (dynamic hint):** unit-tested
+  (`tests/community-hints.test.ts`) and confirmed rendering correctly on a
+  live `/settings` page during the push-flow diagnostics.

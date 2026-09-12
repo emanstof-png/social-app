@@ -102,14 +102,19 @@ run_with_timeout() {
 }
 
 run_claude() {
-  # $1 = prompt file, rest = extra args. Appends to $LOG_FILE via redirection,
-  # not `| tee`: run_with_timeout's own backgrounding depends on nothing else
-  # sharing its pipeline's process group (see run_with_timeout's comment), and
-  # a plain redirect here keeps every claude invocation in this script
-  # consistent with that, rather than some going through tee and some not.
+  # $1 = prompt file (its basename, minus .md, is also this call's LOOP_ROLE
+  # -- see scripts/hooks/fence.sh, which reads that env var to tell a loop
+  # agent apart from a manager session denied Edit/Write on the same paths),
+  # rest = extra args. Appends to $LOG_FILE via redirection, not `| tee`:
+  # run_with_timeout's own backgrounding depends on nothing else sharing its
+  # pipeline's process group (see run_with_timeout's comment), and a plain
+  # redirect here keeps every claude invocation in this script consistent
+  # with that, rather than some going through tee and some not.
   local prompt_file="$1"
   shift
-  claude -p "$(cat "$prompt_file")" --permission-mode acceptEdits "$@" >> "$LOG_FILE" 2>&1
+  local role
+  role="$(basename "$prompt_file" .md | tr '[:upper:]' '[:lower:]')"
+  LOOP_ROLE="$role" claude -p "$(cat "$prompt_file")" --permission-mode acceptEdits "$@" >> "$LOG_FILE" 2>&1
 }
 
 log "=== run-spec.sh: starting one iteration (push=$LOOP_PUSH dryRun=$LOOP_DRY_RUN maxItems=${LOOP_MAX_ITEMS:-none} haltBeforeMigration=$LOOP_HALT_BEFORE_MIGRATION timeout=${BUILDER_TIMEOUT_SECONDS}s) ==="
@@ -188,6 +193,7 @@ fi
 log "Running the builder for spec $spec_num (cap: ${BUILDER_TIMEOUT_SECONDS}s)"
 write_loop_status "$spec_num" "" "builder" "building under the tier rule (cap ${BUILDER_TIMEOUT_SECONDS}s)" ""
 set +e
+export LOOP_ROLE=builder
 run_with_timeout "$BUILDER_TIMEOUT_SECONDS" bash -c "claude -p \"\$(cat docs/agents/BUILDER.md)\" --permission-mode acceptEdits" >> "$LOG_FILE" 2>&1
 builder_status=$?
 set -e

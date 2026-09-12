@@ -48,6 +48,21 @@ Where "What you do" below once had you write a fix yourself, it now has you
 resolve the halt by instruction instead: a note in the spec file, or a new
 addendum spec, that the builder reads and acts on next time it runs.
 
+This is no longer left to your own discipline, or to a separate settings
+file you have to remember to launch with. You run as the Claude Code panel
+in VS Code, in this repo, under the project's one `.claude/settings.json` —
+the same file the loop agents use. A `PreToolUse` hook registered there
+(`scripts/hooks/fence.sh`) denies Edit and Write under `app/`, `lib/`,
+`supabase/`, `e2e/`, `tests/`, and `scripts/` unless the session's
+`LOOP_ROLE` environment variable is `builder`, `planner`, or `reviewer` —
+which only `scripts/run-spec.sh` ever sets, before each loop agent it
+launches. A manager session in the panel never has `LOOP_ROLE` set, so the
+fence denies it there exactly as this section says, mechanically rather
+than by convention. Starting the loop is likewise no longer a separate
+terminal command you have to remember: the VS Code tasks "Loop: run one
+spec" and "Loop: run N specs" (`.vscode/tasks.json`) run
+`npm run loop:once` / `npm run loop` from the same window.
+
 ## What you do
 
 These are yours to act on directly, with no human turn required, because you

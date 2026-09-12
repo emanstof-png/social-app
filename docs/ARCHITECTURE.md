@@ -204,7 +204,7 @@ NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_K
 ANTHROPIC_API_KEY (optional), OPENROUTER_API_KEY, GROQ_API_KEY (optional), GEMINI_API_KEY (optional),
 EXA_API_KEY, TAVILY_API_KEY, SERPER_API_KEY,
 GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, NEXT_PUBLIC_VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY,
-ENCRYPTION_KEY (for provider_keys).
+CRON_SECRET, ENCRYPTION_KEY (for provider_keys).
 
 The three search keys are read from the environment only and never from `provider_keys`
 (spec 05): CLAUDE.md's rule is secrets from environment variables only, and `provider_keys`
@@ -219,6 +219,19 @@ never Vercel, never GitHub repository secrets. `NEXT_PUBLIC_VAPID_PUBLIC_KEY`/
 `VAPID_PRIVATE_KEY` are spec 09's prerequisite, pulled forward into spec 13's own
 prerequisites table so that spec does not halt on it; they go in `.env.local` and Vercel
 (Production and Preview) once spec 09 actually uses them.
+
+**`NEXT_PUBLIC_VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY` (spec 09) are in `.env.local`, in
+active use** — item 3's Settings push UI and item 5's cron route both build and pass
+their own required tests against them locally. **`CRON_SECRET` is not yet set anywhere**
+(`docs/specs/09-evaluation-and-push.md`'s own Prerequisites table names it, alongside the
+VAPID keys, as one of the three things only Eric needs to do before this spec's live
+verification): unlike the VAPID keys, which `npx web-push generate-vapid-keys` generates
+locally with no external account (decision 10), Eric generates this one himself (any
+random string, e.g. `openssl rand -base64 32`) since he also has to know its value to add
+it to Vercel — the builder session cannot do that half regardless. Until it is set, the
+cron route's negative path (missing/wrong header → 401, verified) works, but the
+"correct header actually authenticates" half of item 5's required live test could not be
+run against a real deployed value. See `REVIEW.md` and STATUS.md's Waiting on Eric.
 
 **`GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` (spec 08) are in `.env.local`, in active use.**
 Still open: the Google Cloud OAuth consent screen (scoped to
@@ -298,26 +311,35 @@ places a `spec-NN` tag — only a builder session that actually finished a
 spec does that. High-tier halts stay a human escalation via GitHub issue,
 exactly as for the builder.
 
-**Launching the manager** (`.claude/settings.manager.json`, committed).
-Start it as `claude --settings .claude/settings.manager.json` from the repo
-root — a plain `claude` session in this repo carries none of the manager's
-restrictions, since they live in this file, not in the `.claude/
-settings.json` the builder and reviewer run under. The file holds one thing:
-`Edit(app/**)`/`Edit(lib/**)`/`Edit(supabase/**)`/`Edit(e2e/**)`/
-`Edit(tests/**)`/`Edit(scripts/**)` deny rules enforcing "What you never
-touch" in `docs/agents/MANAGER.md`. A single `Edit(path)` deny rule is
-enough to cover both the Edit and Write tools on that path — Claude Code
-checks file-modification permission only against `Edit`/`Read` path rules,
-never `Write`, so a `Write(path)` rule would be silently ignored. Claude
-Code merges `permissions.deny` lists across settings sources rather than
-one replacing another, so this file's rules land on top of the project's
-own `.claude/settings.json` (still supplying its `npm run *`/`git *`
-allowlist and `acceptEdits` default) instead of needing to restate them.
-Deny rules always win outright over a matching allow from any source
-regardless of specificity, which is also why this file needs no exception
-for `loop.config.json`: that file sits at the repo root, outside every
-directory this file denies, so it was never going to be caught by these
-rules in the first place.
+**Launching the manager** (VS Code panel; the fence is a hook, not a
+separate settings file). The manager runs as the Claude Code panel inside
+VS Code, in this repo, under the project's one `.claude/settings.json` —
+there is no second settings file to remember to launch with anymore. The
+loop itself runs from the same window via the `.vscode/tasks.json` tasks
+"Loop: run one spec" (`npm run loop:once`) and "Loop: run N specs"
+(`npm run loop`), so starting a loop run is a Command Palette "Run Task"
+away rather than a separate terminal invocation.
+
+"What you never touch" in `docs/agents/MANAGER.md` is enforced by a
+`PreToolUse` hook, `scripts/hooks/fence.sh`, registered against the
+`Edit|Write` matcher in `.claude/settings.json`'s `hooks` key. The hook
+reads `tool_input.file_path` off its stdin JSON and denies the call (via
+`hookSpecificOutput.permissionDecision: "deny"` on stdout, per
+code.claude.com/docs/en/hooks.md) when the path falls under `app/`, `lib/`,
+`supabase/`, `e2e/`, `tests/`, or `scripts/` — unless the session's
+`LOOP_ROLE` environment variable is `builder`, `planner`, or `reviewer`.
+`scripts/run-spec.sh` sets that variable itself before each `claude -p`
+call — `run_claude` derives it from the prompt file's own name
+(`PLANNER.md` → `planner`, `REVIEWER.md` → `reviewer`), and the builder
+step sets it explicitly since it doesn't go through `run_claude`. A plain
+manager session in the VS Code panel never sets `LOOP_ROLE`, so the same
+fence that lets the loop's three agents write app code denies the manager
+by default, with no separate settings file for a person to forget to pass.
+Unlike a `permissions.deny` rule, a hook has no notion of rule precedence
+to reason about here — it runs once per matching tool call and returns one
+decision — and it fires for every session that loads this repo's
+`.claude/settings.json`, loop or manager alike, which is what makes the
+separate `--settings` launch step unnecessary now.
 
 **Permissions.** `.claude/settings.json` (committed) is the explicit allowlist an unattended
 `claude -p` session runs under, with `--permission-mode acceptEdits`, never

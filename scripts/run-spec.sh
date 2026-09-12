@@ -46,6 +46,9 @@ BUILDER_TIMEOUT_SECONDS="${BUILDER_TIMEOUT_SECONDS:-$((LOOP_TIMEOUT_MINUTES * 60
 LOG_DIR="logs"
 mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/run-spec-$(date -u +%Y%m%d).log"
+# Truncated once per invocation, before the planner ever runs, so it only
+# ever shows the run currently in progress -- spec 14 (docs/specs/14-live-log.md).
+: > "$LOG_DIR/live.log"
 
 log() {
   echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] $*" | tee -a "$LOG_FILE"
@@ -105,16 +108,24 @@ run_claude() {
   # $1 = prompt file (its basename, minus .md, is also this call's LOOP_ROLE
   # -- see scripts/hooks/fence.sh, which reads that env var to tell a loop
   # agent apart from a manager session denied Edit/Write on the same paths),
-  # rest = extra args. Appends to $LOG_FILE via redirection, not `| tee`:
-  # run_with_timeout's own backgrounding depends on nothing else sharing its
-  # pipeline's process group (see run_with_timeout's comment), and a plain
-  # redirect here keeps every claude invocation in this script consistent
-  # with that, rather than some going through tee and some not.
+  # rest = extra args. claude's stdout+stderr are piped through
+  # scripts/loop-live.ts (spec 14), which echoes every line through
+  # unchanged (onto the final `>> "$LOG_FILE"` redirect, so that file keeps
+  # carrying the exact raw stream it always has) while also appending a
+  # formatted line to logs/live.log for each tool call or message. One new
+  # pipeline stage, not a second `tee` stage -- see docs/specs/14-live-log.md
+  # Decision 1, which explains why: `tee` under this script's `set -m` job
+  # control previously killed more of a timed pipeline than intended (spec
+  # 13's own acceptance testing). LOOP_ROLE is exported, not just prefixed
+  # onto the `claude` command, so scripts/loop-live.ts -- a separate process
+  # further down the same pipeline -- inherits it too.
   local prompt_file="$1"
   shift
   local role
   role="$(basename "$prompt_file" .md | tr '[:upper:]' '[:lower:]')"
-  LOOP_ROLE="$role" claude -p "$(cat "$prompt_file")" --permission-mode acceptEdits "$@" >> "$LOG_FILE" 2>&1
+  export LOOP_ROLE="$role"
+  claude -p "$(cat "$prompt_file")" --permission-mode acceptEdits --output-format stream-json --verbose "$@" 2>&1 \
+    | npx tsx scripts/loop-live.ts >> "$LOG_FILE"
 }
 
 log "=== run-spec.sh: starting one iteration (push=$LOOP_PUSH dryRun=$LOOP_DRY_RUN maxItems=${LOOP_MAX_ITEMS:-none} haltBeforeMigration=$LOOP_HALT_BEFORE_MIGRATION timeout=${BUILDER_TIMEOUT_SECONDS}s) ==="
@@ -194,7 +205,12 @@ log "Running the builder for spec $spec_num (cap: ${BUILDER_TIMEOUT_SECONDS}s)"
 write_loop_status "$spec_num" "" "builder" "building under the tier rule (cap ${BUILDER_TIMEOUT_SECONDS}s)" ""
 set +e
 export LOOP_ROLE=builder
-run_with_timeout "$BUILDER_TIMEOUT_SECONDS" bash -c "claude -p \"\$(cat docs/agents/BUILDER.md)\" --permission-mode acceptEdits" >> "$LOG_FILE" 2>&1
+# Same pipe-through-loop-live.ts wiring as run_claude() above (spec 14):
+# 2>&1 sits right after the claude invocation itself, before the pipe, and
+# the whole "claude | npx tsx ..." pipeline is one bash -c command so
+# run_with_timeout backgrounds and, on a timeout, kills it as a single
+# process group -- see run_with_timeout's own comment for why that matters.
+run_with_timeout "$BUILDER_TIMEOUT_SECONDS" bash -c "claude -p \"\$(cat docs/agents/BUILDER.md)\" --permission-mode acceptEdits --output-format stream-json --verbose 2>&1 | npx tsx scripts/loop-live.ts" >> "$LOG_FILE"
 builder_status=$?
 set -e
 

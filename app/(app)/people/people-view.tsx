@@ -88,7 +88,7 @@ export function PeopleView({ data, timezone }: { data: PeopleData; timezone: str
         />
       ) : null}
 
-      {showImport ? <ImportPanel onDone={() => setShowImport(false)} /> : null}
+      {showImport ? <ImportPanel /> : null}
 
       <section className="flex flex-col gap-3">
         {active.length === 0 ? (
@@ -632,36 +632,45 @@ function LogInteractionForm({
   return (
     <div className="flex flex-col gap-2 rounded border border-black/10 p-3 dark:border-white/15">
       <h3 className="text-xs font-medium opacity-70">Log an interaction</h3>
-      <div className="flex flex-wrap items-center gap-2">
-        <select
-          value={kind}
-          onChange={(event) => setKind(event.target.value as LoggableInteractionKind)}
-          className="rounded border border-black/15 bg-transparent px-2 py-1 text-xs dark:border-white/20"
-        >
-          {LOGGABLE_INTERACTION_KINDS.map((one) => (
-            <option key={one} value={one}>
-              {INTERACTION_KIND_LABELS[one]}
-            </option>
-          ))}
-        </select>
-        <input
-          type="date"
-          value={date}
-          onChange={(event) => setDate(event.target.value)}
-          className="rounded border border-black/15 bg-transparent px-2 py-1 text-xs dark:border-white/20"
-        />
-        <select
-          value={eventId}
-          onChange={(event) => setEventId(event.target.value)}
-          className="rounded border border-black/15 bg-transparent px-2 py-1 text-xs dark:border-white/20"
-        >
-          <option value="">(no event)</option>
-          {meetableEvents.map((meetable) => (
-            <option key={meetable.eventId} value={meetable.eventId}>
-              {meetable.title}
-            </option>
-          ))}
-        </select>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="flex flex-col gap-1 text-xs">
+          <span className="opacity-70">Kind</span>
+          <select
+            value={kind}
+            onChange={(event) => setKind(event.target.value as LoggableInteractionKind)}
+            className="rounded border border-black/15 bg-transparent px-2 py-1 text-xs dark:border-white/20"
+          >
+            {LOGGABLE_INTERACTION_KINDS.map((one) => (
+              <option key={one} value={one}>
+                {INTERACTION_KIND_LABELS[one]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-xs">
+          <span className="opacity-70">Date</span>
+          <input
+            type="date"
+            value={date}
+            onChange={(event) => setDate(event.target.value)}
+            className="rounded border border-black/15 bg-transparent px-2 py-1 text-xs dark:border-white/20"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs">
+          <span className="opacity-70">Event (optional)</span>
+          <select
+            value={eventId}
+            onChange={(event) => setEventId(event.target.value)}
+            className="rounded border border-black/15 bg-transparent px-2 py-1 text-xs dark:border-white/20"
+          >
+            <option value="">(no event)</option>
+            {meetableEvents.map((meetable) => (
+              <option key={meetable.eventId} value={meetable.eventId}>
+                {meetable.title}
+              </option>
+            ))}
+          </select>
+        </label>
         <button
           type="button"
           onClick={submit}
@@ -676,7 +685,11 @@ function LogInteractionForm({
           {result.error}
         </p>
       ) : null}
-      {result?.ok ? <p className="text-xs opacity-70">Logged.</p> : null}
+      {result?.ok ? (
+        <p role="status" className="text-xs opacity-70">
+          Logged.
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -747,7 +760,7 @@ function MessagePanel({ contact }: { contact: ContactCard }) {
 
 // -- vCard/CSV import (item 6) ----------------------------------------------------
 
-function ImportPanel({ onDone }: { onDone: () => void }) {
+function ImportPanel() {
   const [rows, setRows] = useState<ImportPreviewRow[] | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [checked, setChecked] = useState<Set<number>>(new Set());
@@ -789,6 +802,15 @@ function ImportPanel({ onDone }: { onDone: () => void }) {
     });
   }
 
+  /**
+   * Deliberately does not close the panel on success (unlike AddContactForm,
+   * which has no confirmation message to show): closing it in the same tick
+   * as setResult would unmount the "Imported N contacts" note before anyone
+   * could see it, the same unmount-before-render class of bug specs 04/07/09
+   * each found live once. The review checklist itself is cleared so the
+   * panel becomes just the confirmation; the person closes it manually via
+   * the header's "Cancel import" toggle whenever they're done reading it.
+   */
   function confirmImport() {
     if (!rows) return;
     const selected = rows.filter((_, index) => checked.has(index));
@@ -796,10 +818,7 @@ function ImportPanel({ onDone }: { onDone: () => void }) {
     startTransition(async () => {
       const outcome = await importContacts(selected);
       setResult(outcome);
-      if (outcome.ok) {
-        setRows(null);
-        onDone();
-      }
+      if (outcome.ok) setRows(null);
     });
   }
 
@@ -869,7 +888,11 @@ function ImportPanel({ onDone }: { onDone: () => void }) {
           {result.error}
         </p>
       ) : null}
-      {result?.ok && result.note ? <p className="text-xs opacity-70">{result.note}</p> : null}
+      {result?.ok && result.note ? (
+        <p role="status" className="text-xs opacity-70">
+          {result.note}
+        </p>
+      ) : null}
     </div>
   );
 }

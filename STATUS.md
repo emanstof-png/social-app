@@ -41,13 +41,12 @@
 - Read `docs/specs/dojo-and-practice-layer-note.md` before drafting spec 09 or spec 11 — a sharper problem statement and an unscoped "dojo" practice layer that may change what either spec is for.
 
 ## Next
-- [LOOP] spec 10 crm (backlog says draft it).
 - **Real fix still open:** buy OpenRouter credit, or find another confirmed-working free model, for the seven components currently stopgapped onto `gemini-3.6-flash` (see the note above). Until then every component shares one provider, so a bad afternoon on Gemini's free tier affects all of them at once. **Confirmed still biting the E2E_USER_ID account specifically** during the spec 03 rework addendum's live verification (2026-09-08): its `persona_synthesis` row still points at `minimax/minimax-m3:free`, which 404s. Re-seeding or hand-fixing that one account's `model_settings` would let the addendum's success path (not just its failure path) be observed live.
 - **Existing accounts' already-seeded `model_settings` rows were not touched by the default-model fix** — only new seeds get `gemini-3.6-flash`. Check `/settings` (or the table directly) for any account onboarded before 2026-09-07 that still carries `minimax/minimax-m3:free` or `z-ai/glm-5.2:free` on a component it actually uses.
 - 12a item 2: assessment test DONE (spec 04 item 6). Event selection DONE (spec 07 item 7, `e2e/feed.spec.ts`). Spec 05 deliberately adds no e2e suite — see its REVIEW.md.
 
 ## In Progress
-- (nothing in progress)
+- [LOOP] spec 10 crm — build starting, from `docs/specs/10-crm.md`.
 
 ## Blocked
 - (nothing blocking the next spec)

@@ -161,7 +161,28 @@ process or real stdin), and assert the exact formatted lines it produces.
   cap fire, and confirm via `ps` afterward that no `claude` process, no
   `npx tsx`/`node` (running `loop-live.ts`) process, and none of `claude`'s
   own child processes are still alive — not just that `run_with_timeout`
-  returned 124. This is the one part of this spec with real risk: `set -m`
+  returned 124.
+
+  **Resolved 2026-09-12, by hand (Eric).** The unattended builder session
+  hit this exact test's own requirement for bare `bash`/`ps`/`kill`, none of
+  which `.claude/settings.json`'s allowlist covers, and correctly treated
+  that as a High-tier stop (`NEEDS_HUMAN.md`, spec 14 item 3, GitHub issue
+  #8) rather than guessing or working around it. Eric ran the recipe
+  `NEEDS_HUMAN.md` left (a fake `claude` on PATH that emits one stream-
+  json-shaped line, forks a background `sleep 300`, and itself sleeps
+  300s, simulating a long turn plus a child `claude` itself spawned; `run_
+  with_timeout 5 bash -c "claude -p x --permission-mode acceptEdits --
+  output-format stream-json --verbose 2>&1 | npx tsx scripts/loop-
+  live.ts"` under `set -m`) directly, by hand, outside this sandbox.
+  Result: `run_with_timeout` returned `124`; a follow-up `ps` showed no
+  leftover `claude`, no leftover `npx tsx`/`node` running `loop-live.ts`,
+  and no leftover `sleep 300` — the only `claude` processes still running
+  were Eric's own unrelated VS Code sessions. **The resuming builder should
+  not re-attempt this test** (it would hit the identical allowlist denial
+  again, since nothing about the allowlist changed — a human substituted
+  for the unattended session this one time) — just record this exact
+  result in `REVIEW.md`'s account of item 3 when writing it, and move on to
+  item 4. This is the one part of this spec with real risk: `set -m`
   process-group semantics are exactly what let the existing kill reach
   children `claude` itself forks, and this scope item adds one more
   process into that same pipeline that the kill must also reach.

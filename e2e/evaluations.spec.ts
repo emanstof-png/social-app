@@ -261,4 +261,43 @@ test.describe("evaluations", () => {
       .in("entity_id", [FIXTURE_COMMUNITY_ID, FIXTURE_ACTIVITY_ID]);
     expect(prefLogRows).toHaveLength(0);
   });
+
+  for (const seededStatus of ["cut", "returning"] as const) {
+    test(`submitting attended+liked against a '${seededStatus}' community leaves status untouched but still increments times_visited`, async ({
+      page,
+    }) => {
+      const { error: statusError } = await admin
+        .from("communities")
+        .update({ status: seededStatus })
+        .eq("id", FIXTURE_COMMUNITY_ID);
+      if (statusError) throw new Error(`Could not set fixture status: ${statusError.message}`);
+
+      await expect(page.getByText(FIXTURE_TITLE)).toBeVisible({ timeout: 20_000 });
+
+      const card = page.locator("article", { hasText: FIXTURE_TITLE });
+      await card.getByRole("button", { name: FIXTURE_TITLE }).click();
+      await card.getByLabel("Yes, I went").check();
+      await card.getByLabel("Yes, I liked it").check();
+      await card.getByRole("button", { name: "Submit" }).click();
+
+      await expect(card.getByRole("status")).toBeVisible({ timeout: 20_000 });
+
+      await expect
+        .poll(
+          async () => {
+            const { data } = await admin
+              .from("communities")
+              .select("times_visited, status")
+              .eq("id", FIXTURE_COMMUNITY_ID)
+              .single();
+            return data;
+          },
+          {
+            message: `a '${seededStatus}' community must not be moved to 'returning' by the cut/returning guard`,
+            timeout: 10_000,
+          },
+        )
+        .toEqual({ times_visited: 1, status: seededStatus });
+    });
+  }
 });

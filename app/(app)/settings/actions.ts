@@ -575,3 +575,66 @@ export async function checkGoogleConnection(): Promise<ActionResult> {
     return fail(cause);
   }
 }
+
+// -- Web Push (spec 09 item 3) -------------------------------------------------
+
+/** The shape browser PushSubscription#toJSON() returns -- not
+ * pushSubscriptionInsert directly, since the browser nests the two keys
+ * under `keys` rather than as flat columns. */
+const pushSubscriptionJsonSchema = z.object({
+  endpoint: z.string().min(1),
+  keys: z.object({
+    p256dh: z.string().min(1),
+    auth: z.string().min(1),
+  }),
+});
+
+/** Upserts on (user_id, endpoint) -- a re-subscribe (a new endpoint from the
+ * same push service, or a rotated one) is an upsert, not a duplicate
+ * (CONVENTIONS.md#idempotent-writes, migration 0016's own unique index). */
+export async function subscribeToPush(subscriptionJson: unknown): Promise<ActionResult> {
+  try {
+    const parsed = pushSubscriptionJsonSchema.safeParse(subscriptionJson);
+    if (!parsed.success) {
+      return { ok: false, error: "That subscription could not be read." };
+    }
+
+    const { supabase, userId } = await currentUserId();
+    const { error } = await supabase.from("push_subscriptions").upsert(
+      {
+        user_id: userId,
+        endpoint: parsed.data.endpoint,
+        p256dh_key: parsed.data.keys.p256dh,
+        auth_key: parsed.data.keys.auth,
+      },
+      { onConflict: "user_id,endpoint" },
+    );
+
+    if (error) return { ok: false, error: `Could not save that subscription: ${error.message}` };
+
+    revalidatePath("/settings");
+    return { ok: true, message: "Push notifications enabled." };
+  } catch (cause) {
+    return fail(cause);
+  }
+}
+
+export async function unsubscribeFromPush(endpoint: string): Promise<ActionResult> {
+  try {
+    const { supabase, userId } = await currentUserId();
+    const { error } = await supabase
+      .from("push_subscriptions")
+      .delete()
+      .eq("user_id", userId)
+      .eq("endpoint", endpoint);
+
+    if (error) {
+      return { ok: false, error: `Could not remove that subscription: ${error.message}` };
+    }
+
+    revalidatePath("/settings");
+    return { ok: true, message: "Push notifications disabled." };
+  } catch (cause) {
+    return fail(cause);
+  }
+}

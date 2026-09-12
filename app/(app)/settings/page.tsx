@@ -1,6 +1,8 @@
 import { headers } from "next/headers";
 
+import { readActivities, readProfile as readActivitiesProfile } from "@/app/(app)/activities/data";
 import { ABOUT_YOU_QUESTIONS } from "@/lib/assessments/catalogue";
+import { focusState } from "@/lib/activities/plan";
 import { authorizeUrl, signState } from "@/lib/google/oauth";
 import { COMPONENTS, PROVIDERS } from "@/lib/llm/catalog";
 import {
@@ -12,13 +14,15 @@ import { listModels } from "@/lib/llm/model-list";
 import type { ModelOption } from "@/lib/llm/catalog";
 import { hasConfiguredModels } from "@/lib/onboarding";
 import { searchProviderStatus } from "@/lib/search/credentials";
+import { communityHint as computeCommunityHint } from "@/lib/settings/community-hints";
 import type { LlmProvider } from "@/lib/schemas/enums";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { Dials, type DialField } from "./dials";
+import { Dials, type CommunityHint, type DialField } from "./dials";
 import { GoogleCalendar } from "./google-calendar";
 import { ModelSettings } from "./model-settings";
 import { OnboardingStep } from "./onboarding-step";
 import { ProviderKeys, type KeyStatus } from "./provider-keys";
+import { Push } from "./push";
 import { RunLog, type RunLogEntry } from "./run-log";
 import { SearchLog, type SearchLogEntry } from "./search-log";
 import { SearchProviders } from "./search-providers";
@@ -220,6 +224,34 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
     state: signState(user.id, process.env.ENCRYPTION_KEY ?? ""),
   });
 
+  // Dynamic surfacing hint (spec 09 item 6, decision 8): a plain count next
+  // to "Find more communities", no model call. Read only -- the button
+  // itself is unchanged (findMoreCommunitiesFromSettings).
+  const [focusActivities, activitiesProfile] = await Promise.all([
+    readActivities(supabase, user.id),
+    readActivitiesProfile(supabase, user.id),
+  ]);
+  const { focus } = focusState(focusActivities, activitiesProfile.cap);
+  const communityHints: CommunityHint[] = (
+    await Promise.all(
+      focus.map(async (activity) => {
+        const { data: logRows, error: logError } = await supabase
+          .from("preference_log")
+          .select("liked")
+          .eq("user_id", user.id)
+          .eq("entity_type", "genre")
+          .eq("entity_id", activity.id)
+          .order("logged_at", { ascending: false })
+          .limit(5);
+        if (logError) {
+          throw new Error(`Could not read your preference log: ${logError.message}`);
+        }
+        const hint = computeCommunityHint((logRows ?? []).map((row) => Boolean(row.liked)));
+        return hint ? { activityName: activity.name, ...hint } : null;
+      }),
+    )
+  ).filter((hint): hint is CommunityHint => hint !== null);
+
   return (
     <div className="flex max-w-4xl flex-col gap-10">
       <header>
@@ -264,6 +296,17 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
 
       <section className="flex flex-col gap-3">
         <div>
+          <h2 className="text-lg font-medium">Push notifications</h2>
+          <p className="mt-1 text-sm opacity-70">
+            Once a planned event has passed, gazelle asks how it went — on
+            your phone, not just in the app.
+          </p>
+        </div>
+        <Push vapidPublicKey={process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? ""} />
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <div>
           <h2 className="text-lg font-medium">Search providers</h2>
           <p className="mt-1 text-sm opacity-70">
             Discovery searches through these in order, skipping any without a
@@ -297,7 +340,7 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
             searches read these live once you&apos;ve saved a change here.
           </p>
         </div>
-        <Dials dials={dials} />
+        <Dials dials={dials} communityHints={communityHints} />
       </section>
 
       <section className="flex flex-col gap-3">

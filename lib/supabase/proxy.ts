@@ -3,8 +3,13 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { publicEnv } from "@/lib/env";
 
-/** Routes reachable while signed out. Everything else redirects to /login. */
-const PUBLIC_PATHS = ["/login", "/auth", "/offline"];
+/** Routes reachable while signed out. Everything else redirects to /login.
+ * /api/cron carries no Supabase session at all (Vercel's own invocation) --
+ * it authenticates itself via CRON_SECRET
+ * (app/api/cron/evaluation-prompts/route.ts, spec 09 decision 3), so without
+ * this the session gate would 307-redirect every real invocation to /login
+ * and the job would silently never run. */
+const PUBLIC_PATHS = ["/login", "/auth", "/offline", "/api/cron"];
 
 function isPublicPath(pathname: string) {
   return PUBLIC_PATHS.some(

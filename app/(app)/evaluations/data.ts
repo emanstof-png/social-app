@@ -22,6 +22,10 @@ export type PendingEvaluation = {
   startsAt: string;
   title: string;
   communityName: string;
+  /** The cron route's own idempotency marker (spec 09 item 5, decision 2) --
+   * the Evaluations page ignores it (a passed, unanswered occurrence is
+   * still worth showing whether or not a push went out for it). */
+  evaluationPromptedAt: string | null;
 };
 
 export type EvaluationHistoryEntry = {
@@ -98,6 +102,7 @@ export async function loadPendingEvaluations(
         startsAt: occurrence.startsAt,
         title: event.title,
         communityName: community.name,
+        evaluationPromptedAt: selection.evaluation_prompted_at,
       });
     }
   }

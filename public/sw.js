@@ -1,10 +1,10 @@
 /**
- * gazelle service worker — shell only (spec 01).
+ * gazelle service worker — shell + push (spec 01, spec 09 item 4).
  *
- * Deliberately minimal: lifecycle + an offline fallback for navigations.
- * No push handlers yet (spec 09) and no caching of app data or API responses,
- * because every page is auth-gated and per-user; serving a stale shell to the
- * wrong session would be worse than being offline.
+ * Deliberately minimal: lifecycle, an offline fallback for navigations, and
+ * push display. No caching of app data or API responses, because every page
+ * is auth-gated and per-user; serving a stale shell to the wrong session
+ * would be worse than being offline.
  */
 
 const CACHE = "gazelle-shell-v1";
@@ -46,6 +46,30 @@ self.addEventListener("fetch", (event) => {
           new Response("Offline", { status: 503, headers: { "Content-Type": "text/plain" } })
         );
       }
+    })(),
+  );
+});
+
+// Spec 09 item 4: an evaluation-prompt payload, built by buildEvaluationPrompt
+// (lib/push/notification.ts) and sent by sendPushToSubscription
+// (lib/push/webpush-server.ts).
+self.addEventListener("push", (event) => {
+  const { title, body, url } = event.data.json();
+  event.waitUntil(self.registration.showNotification(title, { body, data: { url } }));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  const url = event.notification.data?.url ?? "/";
+  event.notification.close();
+  event.waitUntil(
+    (async () => {
+      const clients = await self.clients.matchAll({ type: "window" });
+      const existing = clients.find((client) => new URL(client.url).pathname === url);
+      if (existing) {
+        await existing.focus();
+        return;
+      }
+      await self.clients.openWindow(url);
     })(),
   );
 });

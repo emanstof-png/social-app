@@ -24,7 +24,21 @@ export type DialField = {
   choices?: string[];
 };
 
-export function Dials({ dials }: { dials: DialField[] }) {
+/** Spec 09 item 6: a plain count, no model call. Only shown once at least
+ * two genre-typed preference_log rows exist for the activity. */
+export type CommunityHint = {
+  activityName: string;
+  liked: number;
+  total: number;
+};
+
+export function Dials({
+  dials,
+  communityHints,
+}: {
+  dials: DialField[];
+  communityHints: CommunityHint[];
+}) {
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm opacity-70">
@@ -39,7 +53,7 @@ export function Dials({ dials }: { dials: DialField[] }) {
         ))}
       </div>
 
-      <RerunActions />
+      <RerunActions communityHints={communityHints} />
     </div>
   );
 }
@@ -100,7 +114,7 @@ function DialRow({ dial }: { dial: DialField }) {
   );
 }
 
-function RerunActions() {
+function RerunActions({ communityHints }: { communityHints: CommunityHint[] }) {
   const [pending, setPending] = useState<"activities" | "communities" | null>(null);
   const [result, setResult] = useState<ActionResult | null>(null);
   const [, startTransition] = useTransition();
@@ -144,6 +158,15 @@ function RerunActions() {
         >
           {result.ok ? result.message : result.error}
         </p>
+      )}
+      {communityHints.length > 0 && (
+        <ul className="flex flex-col gap-0.5 text-xs opacity-70">
+          {communityHints.map((hint) => (
+            <li key={hint.activityName}>
+              {hint.activityName}: Liked {hint.liked} of {hint.total} recent visits
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

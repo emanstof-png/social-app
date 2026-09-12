@@ -20,6 +20,17 @@ export function EvaluationsView({
   history: EvaluationHistoryEntry[];
   timezone: string;
 }) {
+  // Frozen at mount, not resynced from the prop: submitEvaluation's own
+  // revalidatePath("/evaluations") re-renders this page's server parent with
+  // a `pending` that no longer includes the just-answered occurrence (it now
+  // has an evaluations row). Mapping over that live prop directly would
+  // unmount the PendingCard mid-submission -- its own "done" confirmation
+  // state exists but the DOM node showing it is gone before anyone sees it.
+  // Freezing the list at mount means a card stays mounted, and visibly
+  // showing its own "saved" state, for the rest of this page visit; the next
+  // real navigation/reload reads the server's current (now-excluding) list.
+  const [items] = useState(() => pending);
+
   return (
     <div className="flex max-w-2xl flex-col gap-10">
       <header>
@@ -31,14 +42,14 @@ export function EvaluationsView({
 
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-medium">Pending</h2>
-        {pending.length === 0 ? (
+        {items.length === 0 ? (
           <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm">
             Nothing to evaluate yet. Once a planned occurrence has passed, it
             shows up here.
           </p>
         ) : (
           <div className="flex flex-col gap-3">
-            {pending.map((item) => (
+            {items.map((item) => (
               <PendingCard
                 key={`${item.eventId}:${item.occurrenceAt}`}
                 item={item}

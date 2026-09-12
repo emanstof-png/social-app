@@ -6,7 +6,7 @@
 - **LLM:** internal gateway (`lib/llm/gateway.ts`) speaking OpenAI-compatible chat + tool-calling. Providers: Anthropic, OpenRouter, Groq, Gemini (Google AI Studio), local (Ollama/LM Studio URL).
 - **Scheduled jobs:** Supabase cron → Edge Functions (or Vercel Cron). Jobs: scrape_calendars, discover_communities, weekly_plan, evaluation_prompts.
 - **Integrations:** Google Calendar API (OAuth, two-way), Web Push (VAPID), and a search provider chain for discovery — Exa (primary) → Tavily → Serper, all no-card free tiers, walked in that order with fall-through on rate limit or quota (spec 05).
-- **Hosting:** Vercel, auto-deploy from `main`.
+- **Hosting:** Vercel, auto-deploy from `main`. Production alias: `https://gazelle-psi.vercel.app` (project `easyday-outreach/gazelle`; confirmed current via `npx vercel alias ls` — it points at the live production deployment, not a stale one). Already hardcoded in two places that need a stable production origin: `lib/llm/providers.ts`'s OpenRouter `HTTP-Referer` header and `lib/push/webpush-server.ts`'s `VAPID_SUBJECT`.
 
 ## Data model (Supabase tables)
 - `profiles` — user, timezone, home location (Arlington), onboarding state. From the spec 03 rework addendum: `dial_budget`, `dial_sobriety`, `dial_physical`, `dial_location`, `dial_schedule` (all nullable text) — the Settings dials, null until touched, overriding the matching `about_you:<key>` assessment answer once set (`constraintsFrom` in `lib/activities/plan.ts`).
@@ -393,8 +393,9 @@ run against a real deployed value. See `REVIEW.md` and STATUS.md's Waiting on Er
 **`GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` (spec 08) are in `.env.local`, in active use.**
 Still open: the Google Cloud OAuth consent screen (scoped to
 `https://www.googleapis.com/auth/calendar.events`, Eric's account added as a test user),
-two Authorized redirect URIs (`http://localhost:3000/auth/google/callback` and the deployed
-domain's own), and adding both variables to Vercel (Production and Preview) — all three are
+two Authorized redirect URIs (`http://localhost:3000/auth/google/callback` and
+`https://gazelle-psi.vercel.app/auth/google/callback`, the deployed domain named in this
+file's Stack section above), and adding both variables to Vercel (Production and Preview) — all three are
 Eric's to do, per `docs/specs/08-google-calendar-sync.md`'s own prerequisites, and only the
 spec's final live hand-test needs them; everything else was built and verified without real
 Google credentials.

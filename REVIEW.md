@@ -1,239 +1,181 @@
-# REVIEW — spec 14 review-fixes addendum
+# Review — spec 10 (CRM)
 
-Built from `docs/specs/14-review-fixes-addendum.md` only (`docs/specs/14-live-log.md`
-is not re-built — it is already Done, tagged `spec-14`). Resolves
-`REVIEW-FLAGS.md`'s one `blocking` finding from spec 14's review gate: the
-`npm run loop:once`-with-`logs/live.log`-watched acceptance criterion had no
-evidence. Tag `spec-14-review-fixes` (not `spec-14`, which already exists).
+Built by the loop from `docs/specs/10-crm.md` (no addendum). All eight scope
+items finished; nothing High-tier was hit.
 
-## What was built (the one scope item)
+## What was built
 
-No code change — this addendum is Low tier, a documentation/evidence item
-per its own tiering. The single scope item was to record this session's own
-real `npm run loop:once` run as the evidence spec 14's acceptance criteria
-asked for, since this addendum's own launch by `scripts/run-spec.sh` *is*
-one real `loop:once` iteration with `logs/live.log` wired in exactly as
-spec 14 built it.
+1. **`/people` reads and the gated page.** `app/(app)/people/data.ts` follows
+   the spec 04/05 five-file page shape and reuses `../feed/data.ts`'s
+   `readEvents`/`readCommunitiesById`/`readSelections` and
+   `../communities/data.ts`'s `readCommunities` directly — no second query
+   against those tables. `readMeetableEvents` reads `readSelections`'s own
+   rows for `status: 'attended'`, dedupes by `event_id` and keeps the most
+   recent occurrence, rather than re-expanding recurrence through
+   `expandOccurrences`: a contact's `met_at_event_id` references an event,
+   not a specific occurrence, and `expandOccurrences`'s own
+   `MAX_OCCURRENCES_PER_EVENT` cap (walked forward from an event's own
+   `starts_at`) would have silently dropped an attendance far enough into a
+   long-running recurring event's history if a wide `[epoch, year 9999]`
+   window had been used with it instead. `/people` gates on
+   `hasSelectedActivities`, same reasoning every other post-onboarding page
+   already uses.
+2. **Add, edit and archive a contact.** `createContact` validates against
+   `contactInsert` and, in the same call, inserts exactly one founding
+   `'met'` interaction (`occurred_at: met_on ?? now()`, `event_id:
+   met_at_event_id ?? null`). `updateContact` mirrors `updateCommunity`'s
+   exact per-field patch shape, reusing `contactUpdate` for validation.
+   `archiveContact`/`restoreContact` flip `status` — `contacts` has no delete
+   grant in RLS, so this is the only way a contact leaves the active list.
+   The People page renders an Add-contact form, per-field autosave with the
+   established "✓ Saved" badge, and an Active/Archived split
+   (`people/view.ts#partitionByStatus`, kept local rather than importing
+   `communities/view.ts`'s version, per the existing convention that every
+   route's `view.ts` stays self-contained).
+3. **Interaction logging and tallies.** `logInteraction`'s own input schema
+   accepts only `'text' | 'invite' | 'hangout'` — narrower than the
+   `interaction_kind` column — since `'met'` is written in exactly one place
+   (`createContact`) and letting it be logged again here would double-count
+   a relationship's founding interaction. An optional `eventId` is checked
+   against `readMeetableEvents`'s own list. `people/view.ts#tally` counts
+   live from `interactions` on every read, never a stored counter, honoring
+   the table's own migration comment ("Tallies... are derived from these
+   rows, never stored as a counter").
+4. **Compose and send via phone.** A fixed, non-LLM template
+   (`composeTemplate`) behind `sms:`/`mailto:` links, never a send API
+   (CLAUDE.md's hard rule: the app only prepares, the user sends). A manual,
+   undetected-by-design "✓ I sent this" button logs a `'text'` interaction
+   at the moment it's clicked — there's no way for this page to know whether
+   the native app that opened was actually used to send.
+5. **vCard/CSV parsers.** `lib/crm/import.ts`, pure, hand-rolled — the same
+   call `lib/scraping/ics.ts` made for RFC 5545 rather than adding a
+   dependency. A vCard block with no `FN`, or a CSV row with a blank name,
+   is skipped with a warning naming its position; a CSV with no `name`
+   column is rejected up front. `tests/crm-import.test.ts`, 10 cases, red
+   before green.
+6. **Import preview and write.** `previewImport` parses only and writes
+   nothing; it flags a likely duplicate against the caller's existing
+   contacts by `lower(btrim(name))` (`contactNameKey`) so the review screen
+   can warn without silently skipping or silently double-adding.
+   `importContacts` calls `createContact` once per checked row — the same
+   write path item 2 built, not a second implementation — with `met_on`
+   always null (an import has no real meeting date to invent).
+7. **Recall and search.** `people/view.ts#matchesQuery`, a pure client-side
+   filter over the page's own already-loaded contact list (name, phone,
+   email, notes, met-at community/event name) — no new server round trip.
+   `tests/people-view.test.ts`, 8 cases.
+8. **Docs.** `docs/ARCHITECTURE.md` gained a "CRM (spec 10)" section;
+   `CHANGELOG.md` and `STATUS.md` updated; this file.
 
-**The evidence, directly observed, not inferred:**
+## A real bug found live, not by the unit suite
 
-- Early in this session, right after reading the spec, `wc -l logs/live.log`
-  read **13** lines. `tail -5` at that point showed genuine `builder`-role
-  lines naming the real tool calls this session had just made (e.g.
-  `18:49:28  builder  Bash  wc -l ...logs/live.log` — the very check itself,
-  landing in the log before the command that produced it even returned).
-- After several more real tool calls — two `Edit`s to `STATUS.md` moving
-  this spec's line to In Progress, a `git commit` of that move, then a
-  `grep`/`cat` reading `docs/CONVENTIONS.md` and the spec 09 review-fixes
-  addendum for precedent — `wc -l logs/live.log` read **26** lines: growth
-  of 13 real lines, one per tool call/message in between, in the exact
-  order they happened.
-- A full read of the file at the end of this session (31 lines by then)
-  confirms the shape end to end. A representative sample:
-  ```
-  1   18:17:10  planner  Read  /Users/ericdesktop/CODE/social-app/STATUS.md
-  2   18:32:50  planner  Bash  ls docs/specs/ | grep -E '^10-'
-  4   18:32:59  builder  text    I'll start by reading STATUS.md to find which spec to build.
-  17  18:54:32  builder  Edit  /Users/ericdesktop/CODE/social-app/STATUS.md
-  18  18:54:34  builder  Edit  /Users/ericdesktop/CODE/social-app/STATUS.md
-  20  18:54:39  builder  Bash  git add STATUS.md && git commit -m "$(cat <<'EOF'
-  22  18:54:46  builder  text    Committed. Now let's do a few more real tool calls...
-  ```
-  Lines 1-3 are this same `loop:once` iteration's own **planner** phase
-  (choosing spec 10 already has a draft, deferring to this addendum per
-  `STATUS.md`'s Next section) — direct proof this is a genuine multi-agent
-  `run-spec.sh` iteration, not a standalone session with the pipe faked.
-  Lines 17-18 are the two real `Edit` calls this session made to
-  `STATUS.md` (confirmed above), and line 20 is the real `git commit` that
-  followed, in the correct order relative to each other.
+The import review panel called `onDone()` (closing itself) in the same
+render tick as `setResult(outcome)` (showing "Imported N contacts"), so the
+confirmation was computed but never actually seen — the component unmounted
+before the browser painted it. This is the same unmount-before-render class
+of bug specs 04, 07 and 09 each hit exactly once, each time only caught by
+the required live e2e run against a real production server, never by
+`next build` or the unit suite. Fixed in
+`app/(app)/people/people-view.tsx#ImportPanel.confirmImport`: success no
+longer auto-closes the panel — it clears the review checklist and leaves the
+confirmation on screen until the person dismisses it via "Cancel import"
+themselves.
 
-**This *is* the real `npm run loop:once` run spec 14's acceptance criterion
-asked for** — not a stand-in for it. This session is itself one iteration of
-`npm run loop:once` (`"loop:once": "bash scripts/run-spec.sh"`), launched
-the normal way, with `logs/live.log` truncated fresh at this iteration's own
-start per `scripts/run-spec.sh`'s existing behavior (spec 14 item 3). No
-second `loop:once` was launched from inside this session — that would
-recreate the exact "bare `claude` outside the allowlist" problem spec 14's
-own `REVIEW.md` already hit, for no reason, since this session's own launch
-already is one iteration.
+## The viral/k-factor addition note
 
-## Verified per CLAUDE.md's rule, adapted for loop tooling
-
-Same adaptation spec 13 and spec 14 both used (no web route to serve): the
-addendum's own existence as a real `npm run loop:once` run, with the
-directly-observed line-count growth and quoted sample above, is what
-satisfies the rule here. No code changed, so `npm run lint`/`typecheck`/
-`test` were not re-run beyond what the pre-commit hook already ran on the
-one `STATUS.md` commit above (612 unit tests, green).
-
-## What I was unsure about
-
-Nothing new. The one prior uncertainty (spec 13/14's "stubbed `claude`
-should count as the real thing" reading) is superseded — this addendum
-found and used the genuine article instead: a real `run-spec.sh`-launched
-session with real `claude -p ... --output-format stream-json --verbose`
-output flowing through `scripts/loop-live.ts` the entire time.
-
-## What the next spec needs
-
-Nothing from this addendum. Spec 10 (crm) is next, already drafted at
-`docs/specs/10-crm.md`.
-
----
-
-# REVIEW — spec 14 (live loop log), carried forward and amended
-
-The account below is spec 14's own, written when that spec finished
-(tag `spec-14`, Done). Preserved here per this addendum's own scope item —
-"fold this evidence back into `REVIEW.md`'s account of spec 14 itself" —
-with only the "Verification actually performed" section's closing
-paragraph amended (marked below) to point at the addendum above instead of
-describing the gap as outstanding.
-
-Built from `docs/specs/14-live-log.md` (no addendum, no PRD coverage — loop
-tooling only, like spec 13). Pulled forward ahead of spec 10 for the same
-reason 12a and 13 both jumped the queue. Tag `spec-14`.
-
-This session resumed spec 14 mid-build: items 1-3 were already committed by
-earlier sessions (`e53a64b`/`a8146b0`, `859e2ac`, `f885398`/`c9ba5af`/
-`2a91bd5`). This session verified that work, then built item 4 (docs) and
-wrote this account.
-
-## What was built (items 1-3, as inherited)
-
-- **Item 1.** `tests/fixtures/loop-live/sample.ndjson` — a real
-  `claude -p "Say the word hello and nothing else." --output-format
-  stream-json --verbose` capture, run by hand by Eric (the bare `claude`
-  command is outside `.claude/settings.json`'s Bash allowlist, so the
-  unattended builder correctly treated running it itself as a High-tier
-  stop, per `NEEDS_HUMAN.md`/issue #7). Confirms the default
-  (non-partial-messages) shape: `rate_limit_event`, then `system`/`init`,
-  then a complete `assistant` message with the full text already in
-  `message.content[].text` (no delta accumulation needed), then one
-  `result`-typed line.
-- **Item 2.** `scripts/loop-live.ts`: reads NDJSON off stdin one line at a
-  time, echoes every input line to stdout unchanged (always, whether or not
-  it parses), and for each `type: "assistant"` line appends zero or more
-  formatted lines to `logs/live.log` — one per `tool_use` block
-  (`HH:MM:SS  <role>  <ToolName>  <detail>`, `<detail>` falling back
-  `input.file_path` → `input.command` (80-char truncated) → truncated raw
-  JSON) and one per `text` block (`HH:MM:SS  <role>  text    <first line,
-  120-char truncated>`). Never throws (try/catch per line — a malformed
-  line or unexpected shape formats to no `logs/live.log` line but is still
-  echoed) and never exits non-zero, per Decision 2's explanation of why
-  that's load-bearing for `run-spec.sh`'s `pipefail`-based halt detection.
-  `formatEvents` is exported separately from `main()` so
-  `tests/loop-live.test.ts` (13 tests, red before green) can assert exact
-  formatted output against item 1's fixture, a hand-written malformed line,
-  and a `tool_use` block with neither `file_path` nor `command` in its
-  input, without needing a real child process or real stdin.
-- **Item 3.** `scripts/run-spec.sh`'s three `claude -p` invocation sites
-  (both call sites inside `run_claude()`, and the builder's own inline
-  invocation) all gained `--output-format stream-json --verbose` and now
-  read `claude -p ... 2>&1 | npx tsx scripts/loop-live.ts >> "$LOG_FILE"` —
-  one new pipeline stage, not two, per Decision 1 (no second `tee`, since
-  `run_with_timeout`'s own comment already documents a real bug from piping
-  a timed job through `tee` under this script's `set -m`). `logs/live.log`
-  is truncated once near the top of the script (`: > "$LOG_DIR/live.log"`),
-  before the planner ever runs, so it only ever shows the current
-  iteration. `LOOP_ROLE` is exported before each invocation exactly as it
-  already was — `loop-live.ts` reads it as its role label, it doesn't set
-  it.
-
-  Item 3's own required proof — that `run_with_timeout` still kills the
-  whole process group with `loop-live.ts` now in the pipe — needed bare
-  `bash`/`ps`/`kill`, none of which the allowlist covers, so the unattended
-  builder correctly stopped (`NEEDS_HUMAN.md`, issue #8) rather than
-  guessing or working around it. **Resolved by hand by Eric, 2026-09-12:**
-  ran the recipe `NEEDS_HUMAN.md` left — a fake `claude` on PATH that emits
-  one stream-json-shaped line, forks a background `sleep 300`, and itself
-  sleeps 300s (simulating a long turn plus a child `claude` itself
-  spawned); `run_with_timeout 5 bash -c "claude -p x --permission-mode
-  acceptEdits --output-format stream-json --verbose 2>&1 | npx tsx
-  scripts/loop-live.ts"` under `set -m`. Result: `run_with_timeout`
-  returned `124`; a follow-up `ps` showed no leftover `claude`, no leftover
-  `npx tsx`/`node` running `loop-live.ts`, and no leftover `sleep 300` — the
-  only `claude` processes still running were Eric's own unrelated VS Code
-  sessions. Recorded directly in `docs/specs/14-live-log.md` under scope
-  item 3 (dated), per the resolution note's own instruction, since
-  `REVIEW.md` is overwritten wholesale on resume rather than read.
-
-## What this session built (item 4 — docs)
-
-- `docs/ARCHITECTURE.md`'s Build loop section gained a "Watching a run
-  live" paragraph explaining `logs/live.log`: what it shows, how
-  `loop-live.ts` sits in the pipe without disturbing
-  `logs/run-spec-YYYYMMDD.log`'s existing raw-NDJSON content, and that it
-  truncates fresh at the start of every `run-spec.sh` invocation.
-- `CHANGELOG.md` gained one line.
-- `docs/BUILD_PHASES.md`'s and `STATUS.md`'s "Actual build order so far"
-  lines both gained a `→ 14 (pulled forward)` segment.
-- `STATUS.md`: this spec's line moved from In Progress to Done, with the
-  same kind of summary the existing Done entries carry.
-- This file, overwritten, and tag `spec-14`.
-
-Low tier — docs only, per the spec's own tiering.
+`docs/specs/10-crm-addition-note.md` (shareable event page, one-tap account
+creation, share-sheet invite scripts, "N friends going" social proof) was
+read during drafting and deliberately **not** folded into this spec's scope.
+The note itself asks for exactly this — that a session with no live planning
+chat available should flag it rather than build it unilaterally or drop it
+silently — because it raises real, unresolved product and privacy questions
+(an unauthenticated page, a new account-creation path, what "N friends
+going" reveals about a private list). It stays fully out of scope; whoever
+runs the next review gate should read it and decide whether/how a future
+spec picks it up.
 
 ## How to test this by hand
 
-1. `npm run test -- tests/loop-live.test.ts` — 13/13 pass, asserting exact
-   formatted `logs/live.log` lines against `tests/fixtures/loop-live/
-   sample.ndjson` plus hand-written malformed/edge cases.
-2. To watch it live against a real loop iteration: run `npm run loop:once`,
-   open `logs/live.log` in an editor or `tail -f logs/live.log` in a
-   terminal while it runs, and watch lines appear naming `LOOP_ROLE`
-   (`planner`/`builder`/`reviewer`) and each tool call or message as it
-   happens, not only after the script exits.
-3. To reproduce the addendum session's own live check without a real
-   `claude` session: feed `tests/fixtures/loop-live/sample.ndjson`'s lines
-   one at a time with a short delay into `npx tsx scripts/loop-live.ts`
-   (stdin piped from a small script, `LOOP_ROLE` set in its environment)
-   and read `logs/live.log`'s size after each write — it should grow
-   partway through the feed, before the process exits.
+1. `npm run dev` (or `next build && next start`), sign in, and visit
+   `/people`. If gated, finish onboarding through `activities_selected`
+   first (assessment, then pick a focus activity on `/activities`).
+2. Click **Add contact**, type only a name, submit. The contact appears in
+   the active list immediately. Expand its card — the History section
+   shows one "Met" entry.
+3. Expand a contact and edit **Notes** (blur to save). A "✓ Saved" badge
+   flashes next to Notes only; no other field changes.
+4. Click **Archive** on a contact. It disappears from the active list and
+   reappears under the "N archived" `<details>` section with a **Restore**
+   button.
+5. Expand a contact, use **Log an interaction** (pick a kind, a date,
+   optionally an event), click **Log**. The card's header count and the
+   History list both update without a manual page reload.
+6. Expand a contact with a phone/email on file. The **Message** panel shows
+   a prefilled draft; the **Text**/**Email** links' `href` carries the
+   drafted text URL-encoded. Click **✓ I sent this** twice — two `'text'`
+   interactions appear in History.
+7. Click **Import vCard/CSV**, choose a small `.vcf` or `.csv` file (a phone
+   Contacts app's own "Export vCard," or a spreadsheet's CSV export both
+   work). The review screen lists every parsed row, checked by default,
+   with warnings for anything unparseable and a "Likely duplicate" tag for
+   a name that already exists. Uncheck rows you don't want, click
+   **Import N contacts**; the confirmation stays on screen until you close
+   the panel yourself.
+8. Type into the search box at the top — the list narrows immediately, with
+   no loading state (there is no server round trip).
+
+## What I was unsure about
+
+- Whether `readMeetableEvents` should list every distinct **occurrence** a
+  user attended of a recurring event, or dedupe to one entry per **event**.
+  Went with one-per-event (keeping the most recent attended occurrence),
+  because `contacts.met_at_event_id` is a plain event reference with no
+  occurrence column — there is nowhere on the contact row to store which
+  specific occurrence someone was met at, so offering occurrence-level
+  granularity in the dropdown would have been a distinction the schema
+  can't actually record.
+- The compose template's wording is a single fixed sentence
+  (`composeTemplate` in `people/view.ts`). The spec only asks for "a plain
+  template," not specific copy, so this is a placeholder tone choice, not a
+  product decision — easy to change later without touching any write path.
+
+## What spec 11 needs
+
+- `invite_suggestions` and the real `invite_suggestion` LLM component prompt
+  are still spec 11's, untouched here. `readMeetableEvents` in
+  `app/(app)/people/data.ts` is available to reuse for "who was at this
+  event" style logic if spec 11 needs it.
+- The viral/k-factor addition note above is still unscoped and unbuilt —
+  worth a decision at this review gate before spec 11 starts, since spec 11
+  is the next PRD-numbered CRM-adjacent spec (§4.4/4.6) and the two could
+  otherwise collide in scope.
+- `docs/specs/dojo-and-practice-layer-note.md` (flagged in `STATUS.md` since
+  before spec 09) is still unread against spec 11 as of this session.
 
 ## Verification actually performed
 
-Both halves of `CLAUDE.md`'s rule, adapted for loop tooling the same way
-spec 13's own `REVIEW.md` adapted it (no web route to serve):
+Both halves of the CLAUDE.md rule, not just `next build`:
 
-- `npm run lint`, `npm run typecheck`, `npm run test` (612 unit tests,
-  including `tests/loop-live.test.ts`'s 13) all green.
-- **The pipe's live-write behavior was verified live, not just via the
-  unit suite.** Two things stood in for "watched `logs/live.log` during a
-  real `npm run loop:once` run" when this session first wrote this account:
-  1. Item 3's own hand-run (above) already exercised the real production
-     pipe end to end — `claude -p ... --output-format stream-json --verbose
-     | npx tsx scripts/loop-live.ts`, a fake `claude` standing in — and
-     confirmed via `ps` that it ran and tore down correctly as one process
-     group, which necessarily means a real stream-json line flowed through
-     `loop-live.ts` during that live run.
-  2. This session additionally drove the real `scripts/loop-live.ts`
-     process (not `formatEvents()` called directly, which the unit test
-     already covers) over genuinely streamed stdin: fed
-     `tests/fixtures/loop-live/sample.ndjson`'s four lines one at a time
-     with a 150ms delay between each, reading `logs/live.log`'s byte size
-     after every write. Observed: 0 bytes after the first two lines
-     (`rate_limit_event`, `system`/`init` — neither produces a
-     `logs/live.log` line by design), 37 bytes after the third line (the
-     `assistant`/`text` "hello" message) — while the child process was
-     still running (`child.killed === false`) — and unchanged after the
-     fourth (`result`-typed, also produces no line).
+- `next build` passed. `npm run lint`, `npm run typecheck`, and `npm test`
+  (635 unit tests, including this spec's 18 new ones) all green.
+- A real production `next start` server served real authenticated requests:
+  `npx playwright test e2e/people.spec.ts` — **8/8 passed** — exercising add
+  (with the founding interaction verified via the admin client), per-field
+  edit isolation, archive/restore, interaction-tally freshness after a real
+  server round trip (not a stale cached count), the compose panel's actual
+  `href` attributes plus two real confirm-send writes, vCard import (two
+  valid contacts, one missing-`FN` block, both preview and write verified
+  against the real database), CSV import with a real duplicate-name flag,
+  and the search filter (verified to fire zero same-origin `POST` requests
+  while typing). The vCard/CSV steps drove a real browser
+  `<input type="file">` via Playwright's `setInputFiles`, not a stub or a
+  direct function call.
+- The full `npm run test:e2e` suite was run as a regression check:
+  **27 passed, 1 failed, 1 skipped.** The failure
+  (`e2e/settings-push.spec.ts`) and the skip (the cron route's positive
+  path) are the same two pre-existing, already-documented gaps under
+  `STATUS.md`'s Waiting on Eric section (Playwright's bundled Chromium has
+  no working Push API; `CRON_SECRET` is not yet set) — both predate this
+  spec and are unrelated to it. No new failures.
 
-  **Amended by the spec 14 review-fixes addendum (2026-09-12), which
-  supersedes this paragraph:** the two items above were an honest,
-  well-reasoned but ultimately un-adjudicated stand-in — the reviewer
-  correctly flagged this as `blocking` in `REVIEW-FLAGS.md`, since the
-  acceptance criteria's actual wording asks for a real `npm run loop:once`
-  run watched live, not a fixture replay or a stubbed-`claude` process-group
-  test. **That gap is now closed**: the review-fixes addendum session was
-  itself launched by `scripts/run-spec.sh` as a genuine `npm run loop:once`
-  iteration, and directly observed `logs/live.log` grow from 13 to 26 real
-  lines as its own real tool calls happened, including a genuine `planner`-
-  role phase from the same iteration preceding it. Full evidence, quoted
-  sample, and reasoning in this file's own top section, "REVIEW — spec 14
-  review-fixes addendum."
-
-## What the next spec needs
-
-Nothing from spec 14 itself. Spec 10 (crm) is next, already drafted at
-`docs/specs/10-crm.md`, waiting in `STATUS.md`'s Next section.
+Review gate: open your planning chat and paste REVIEW.md.

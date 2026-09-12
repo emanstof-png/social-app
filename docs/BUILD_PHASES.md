@@ -17,7 +17,7 @@ Paste ONE at a time. Each spec file in docs/specs/ has scope, acceptance criteri
 | 11 | weekly-planning-and-invites | PRD §3.5–3.6, §4.4, 4.6 (weekly plan from feed, ongoing discovery job, invite suggestions, group-invite suggestion) | Sonnet | 1–2 |
 
 ## Actual build order so far
-`00 → 01 → 02 → 12a (pulled forward) → 03 → 04 → 05 → 06 → 13 (pulled forward) → 07 → 03-rework (addendum) → 07-calendar-fields (addendum) → saved-confirmation-fix → 08 → 09 → 09-review-fixes (addendum) → 14 (pulled forward) → 14-review-fixes (addendum)`. The table above is the plan; this is what was run.
+`00 → 01 → 02 → 12a (pulled forward) → 03 → 04 → 05 → 06 → 13 (pulled forward) → 07 → 03-rework (addendum) → 07-calendar-fields (addendum) → saved-confirmation-fix → 08 → 09 → 09-review-fixes (addendum) → 14 (pulled forward) → 14-review-fixes (addendum) → 10`. The table above is the plan; this is what was run.
 
 **Spec 04 was re-drafted before it was built.** The original one-page sketch
 (`04-activities-and-focus.md`, written before specs 01–03 existed) was replaced

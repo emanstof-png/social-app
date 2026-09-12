@@ -305,6 +305,57 @@ the suite were reconfigured to drive a real installed Chrome (`channel:
 "chrome"`), a cross-cutting Playwright config change affecting every e2e
 test, not something this one item's scope covers. See `REVIEW.md`.
 
+## CRM (spec 10)
+No new migration -- `contacts`, `interactions` and `invite_suggestions`
+(with their enums and RLS) were all already in spec 01's original migration,
+unused until now. `app/(app)/people/` follows the spec 04/05 five-file page
+layout, reusing `../feed/data.ts`'s `readEvents`/`readCommunitiesById`/
+`readSelections` and `../communities/data.ts`'s `readCommunities` directly
+rather than re-querying the same tables.
+
+**A contact always gets a founding `'met'` interaction, written by
+`createContact` itself.** Without it a freshly added contact's tally would
+start at zero even though adding them records a real meeting. `logInteraction`
+therefore only accepts `'text' | 'invite' | 'hangout'` -- a narrower schema
+than the `interaction_kind` column itself, enforced by the action's own input
+validation, not a database change. `'met'` is written in exactly one place.
+
+**Tallies are computed live from `interactions`, never a stored counter** --
+the table's own migration comment already said this was the design; this
+spec is the first to actually read it that way (`tally` in `people/view.ts`).
+
+**vCard and CSV parsing is hand-rolled** (`lib/crm/import.ts`), the same call
+`lib/scraping/ics.ts` made for RFC 5545: both are simple, well-documented text
+grammars, and a phone's own Contacts app can export a vCard, with CSV as the
+spreadsheet fallback. No Contact Picker API or Web Share Target is relied on
+-- neither is reliably available on this app's target platforms today. A
+block/row with no name is skipped with a warning naming its position, never
+guessed at; `previewImport` parses and writes nothing, and a likely-duplicate
+row (matched by `lower(btrim(name))`) is flagged on the review screen for a
+person to decide, never silently skipped or merged.
+
+**The compose panel drafts a fixed template, no LLM component.**
+`invite_suggestion`'s real prompt is spec 11's; a second, ad-hoc drafting path
+here would either duplicate or ship a worse version of that future work.
+Sending is `sms:`/`mailto:` links only (CLAUDE.md's hard rule: the app only
+prepares, never sends), followed by a manual, undetected-by-design "I sent
+this" confirmation -- there is no way for a web page to know whether the
+native app it opened was actually used to send.
+
+**A real bug found live, the same unmount-before-render class specs 04/07/09
+each hit once:** the import review panel closed itself in the same tick as
+showing "Imported N contacts," so the confirmation was never actually seen.
+Fixed by not auto-closing on success -- see `e2e/people.spec.ts` and
+`REVIEW.md`.
+
+**Out of scope, deliberately:** the weekly invite-suggestion job, the real
+`invite_suggestion` prompt, any automatic "who to invite to what," group
+invites and "N friends going" social proof, and the entire viral/k-factor
+loop from `docs/specs/10-crm-addition-note.md` (an unauthenticated shareable
+event page, one-tap account creation, share-sheet invite scripts) -- flagged
+at the spec's own drafting time as needing its own scoping pass, not folded
+in. All of PRD §4.4/4.6 stays spec 11's.
+
 ## Environment (.env.local and Vercel)
 NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY,
 ANTHROPIC_API_KEY (optional), OPENROUTER_API_KEY, GROQ_API_KEY (optional), GEMINI_API_KEY (optional),

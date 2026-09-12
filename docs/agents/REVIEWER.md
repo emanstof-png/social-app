@@ -11,13 +11,34 @@ runs the reviewer after a spec is tagged, since a `loop.config.json` `dryRun`
 or `maxItems`-paused session (neither of which tags) is deliberately not
 "just built." If you are running anyway and the tag is genuinely missing,
 write `NEEDS_HUMAN.md` saying so and stop rather than reviewing an unfinished
-build. Read, in this order:
+build.
 
-1. The spec file itself, `docs/specs/NN-*.md`, in full.
+**A tag can be suffixed: `spec-NN-<topic>`, not just `spec-NN`.** A spec
+built from `docs/specs/NN-<topic>-addendum.md` (the `NN-review-fixes-
+addendum.md` shape `docs/agents/MANAGER.md` uses to resolve a `blocking`
+finding, or any other addendum that shares a number with a spec already
+built) tags itself `spec-NN-<topic>` precisely because plain `spec-NN`
+already exists and would collide — `spec-03-rework` and `spec-07-calendar-
+fields` are the established precedent, `spec-09-review-fixes` the same
+shape. Do not assume the newest `spec-NN`-prefixed tag is a plain numbered
+one; check `STATUS.md`'s Done section for the exact tag name it gives the
+spec you were just asked to review, and use that literal tag, suffix
+included. When the tag is suffixed this way, its "previous tag" for the
+diff below is the *base* spec's own tag (`spec-09` for `spec-09-review-
+fixes`), not `spec-(NN-1)` — you are diffing what this follow-up spec
+changed on top of its parent, not re-reviewing the parent's own diff from
+the spec before it.
+
+Read, in this order:
+
+1. The spec file itself — `docs/specs/NN-*.md`, or, for a suffixed tag,
+   whichever `docs/specs/NN-*-addendum.md` file STATUS.md's Done entry
+   names — in full.
 2. `REVIEW.md` at the repo root, as the builder left it.
-3. `git diff spec-(NN-1)..spec-NN` — the previous tag to this one. If this is
-   the first spec the loop has ever built, diff from the commit before the
-   builder's STATUS.md-to-In-Progress commit instead.
+3. `git diff <base-tag>..<this-tag>` — `<base-tag>` is `spec-(NN-1)` for a
+   plain `spec-NN` tag, or the parent spec's own tag for a suffixed one (see
+   above). If this is the first spec the loop has ever built, diff from the
+   commit before the builder's STATUS.md-to-In-Progress commit instead.
 
 Check three things, in this order, and write every finding to
 `REVIEW-FLAGS.md` at the repo root (overwrite) as you go, each line labelled

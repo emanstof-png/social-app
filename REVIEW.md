@@ -1,91 +1,165 @@
-# REVIEW — spec 09 review-fixes addendum
+# REVIEW — spec 14 (live loop log)
 
-Built 2026-09-12 by the loop, from `docs/specs/09-review-fixes-addendum.md`
-only. This is not spec 09 itself (already built, tagged `spec-09`, Done) —
-it resolves `REVIEW-FLAGS.md`'s one `blocking` finding from spec 09's review
-gate: the cut/returning guard in `submitEvaluation` had no test proving it.
-Tag `spec-09-review-fixes`, not `spec-09` (that tag already exists on a
-different commit).
+Built from `docs/specs/14-live-log.md` (no addendum, no PRD coverage — loop
+tooling only, like spec 13). Pulled forward ahead of spec 10 for the same
+reason 12a and 13 both jumped the queue. Tag `spec-14`.
 
-## What was built
+This session resumed spec 14 mid-build: items 1-3 were already committed by
+earlier sessions (`e53a64b`/`a8146b0`, `859e2ac`, `f885398`/`c9ba5af`/
+`2a91bd5`). This session verified that work, then built item 4 (docs) and
+wrote this account.
 
-The addendum's single scope item, Low tier per `CLAUDE.md` (a test addition
-against already-correct, already-shipped code — no new application logic,
-migration, or server action):
+## What was built (items 1-3, as inherited)
 
-- **`e2e/evaluations.spec.ts` gained two new tests** (a parametrized loop
-  over `['cut', 'returning']`, reading more clearly here than two separate
-  copies), reusing every existing fixture helper unchanged
-  (`seedFixture`/`clearFixture`/`adminClient`/`testUserEmail`/
-  `magicLinkTokenHash`/`setOnboarding`/`pastOccurrenceAt`/`FIXTURE_*`). Each
-  test overrides the fixture community's `status` after `beforeEach`'s
-  `seedFixture` call via a direct admin-client `update`, drives a real
-  `attended: true, liked: true` submission through the UI exactly like the
-  file's first existing test, and confirms via the admin client that
-  `communities.status` is unchanged (`'cut'` stays `'cut'`, `'returning'`
-  stays `'returning'`) while `times_visited` still increments by one —
-  proving both the guard (no false promotion to `'returning'`) and Decision
-  7 ("a visit is a visit, liked or not") in the same assertion.
-- **No code change to `submitEvaluation`'s guard itself.** Per the
-  addendum's own instruction, the guard at `app/(app)/evaluations/
-  actions.ts` (`if (liked && (currentStatus === "todo" || currentStatus ===
-  "went_once"))` before the `status: "returning"` write) was read and
-  confirmed correct as written; this session did not touch it.
+- **Item 1.** `tests/fixtures/loop-live/sample.ndjson` — a real
+  `claude -p "Say the word hello and nothing else." --output-format
+  stream-json --verbose` capture, run by hand by Eric (the bare `claude`
+  command is outside `.claude/settings.json`'s Bash allowlist, so the
+  unattended builder correctly treated running it itself as a High-tier
+  stop, per `NEEDS_HUMAN.md`/issue #7). Confirms the default
+  (non-partial-messages) shape: `rate_limit_event`, then `system`/`init`,
+  then a complete `assistant` message with the full text already in
+  `message.content[].text` (no delta accumulation needed), then one
+  `result`-typed line.
+- **Item 2.** `scripts/loop-live.ts`: reads NDJSON off stdin one line at a
+  time, echoes every input line to stdout unchanged (always, whether or not
+  it parses), and for each `type: "assistant"` line appends zero or more
+  formatted lines to `logs/live.log` — one per `tool_use` block
+  (`HH:MM:SS  <role>  <ToolName>  <detail>`, `<detail>` falling back
+  `input.file_path` → `input.command` (80-char truncated) → truncated raw
+  JSON) and one per `text` block (`HH:MM:SS  <role>  text    <first line,
+  120-char truncated>`). Never throws (try/catch per line — a malformed
+  line or unexpected shape formats to no `logs/live.log` line but is still
+  echoed) and never exits non-zero, per Decision 2's explanation of why
+  that's load-bearing for `run-spec.sh`'s `pipefail`-based halt detection.
+  `formatEvents` is exported separately from `main()` so
+  `tests/loop-live.test.ts` (13 tests, red before green) can assert exact
+  formatted output against item 1's fixture, a hand-written malformed line,
+  and a `tool_use` block with neither `file_path` nor `command` in its
+  input, without needing a real child process or real stdin.
+- **Item 3.** `scripts/run-spec.sh`'s three `claude -p` invocation sites
+  (both call sites inside `run_claude()`, and the builder's own inline
+  invocation) all gained `--output-format stream-json --verbose` and now
+  read `claude -p ... 2>&1 | npx tsx scripts/loop-live.ts >> "$LOG_FILE"` —
+  one new pipeline stage, not two, per Decision 1 (no second `tee`, since
+  `run_with_timeout`'s own comment already documents a real bug from piping
+  a timed job through `tee` under this script's `set -m`). `logs/live.log`
+  is truncated once near the top of the script (`: > "$LOG_DIR/live.log"`),
+  before the planner ever runs, so it only ever shows the current
+  iteration. `LOOP_ROLE` is exported before each invocation exactly as it
+  already was — `loop-live.ts` reads it as its role label, it doesn't set
+  it.
 
-### Deviation from the addendum's suggested seeding approach
+  Item 3's own required proof — that `run_with_timeout` still kills the
+  whole process group with `loop-live.ts` now in the pipe — needed bare
+  `bash`/`ps`/`kill`, none of which the allowlist covers, so the unattended
+  builder correctly stopped (`NEEDS_HUMAN.md`, issue #8) rather than
+  guessing or working around it. **Resolved by hand by Eric, 2026-09-12:**
+  ran the recipe `NEEDS_HUMAN.md` left — a fake `claude` on PATH that emits
+  one stream-json-shaped line, forks a background `sleep 300`, and itself
+  sleeps 300s (simulating a long turn plus a child `claude` itself
+  spawned); `run_with_timeout 5 bash -c "claude -p x --permission-mode
+  acceptEdits --output-format stream-json --verbose 2>&1 | npx tsx
+  scripts/loop-live.ts"` under `set -m`. Result: `run_with_timeout`
+  returned `124`; a follow-up `ps` showed no leftover `claude`, no leftover
+  `npx tsx`/`node` running `loop-live.ts`, and no leftover `sleep 300` — the
+  only `claude` processes still running were Eric's own unrelated VS Code
+  sessions. Recorded directly in `docs/specs/14-live-log.md` under scope
+  item 3 (dated), per the resolution note's own instruction, since
+  `REVIEW.md` is overwritten wholesale on resume rather than read.
 
-The addendum offered two options for seeding a non-`'todo'` status: an
-optional `status` parameter on `seedFixture`, or a follow-up admin-client
-`update` after it runs. Took the second — `seedFixture`'s signature (and
-therefore `beforeEach`, which every other test in the file shares) stays
-untouched, so this addendum's diff is confined to new test bodies rather
-than touching shared fixture code the other two tests depend on. `liked`
-and `attended` are decided at submit time from the community row's current
-state, not from whatever the page loaded with, so updating the status any
-time before clicking Submit is equivalent to seeding it that way from the
-start.
+## What this session built (item 4 — docs)
+
+- `docs/ARCHITECTURE.md`'s Build loop section gained a "Watching a run
+  live" paragraph explaining `logs/live.log`: what it shows, how
+  `loop-live.ts` sits in the pipe without disturbing
+  `logs/run-spec-YYYYMMDD.log`'s existing raw-NDJSON content, and that it
+  truncates fresh at the start of every `run-spec.sh` invocation.
+- `CHANGELOG.md` gained one line.
+- `docs/BUILD_PHASES.md`'s and `STATUS.md`'s "Actual build order so far"
+  lines both gained a `→ 14 (pulled forward)` segment.
+- `STATUS.md`: this spec's line moved from In Progress to Done, with the
+  same kind of summary the existing Done entries carry.
+- This file, overwritten, and tag `spec-14`.
+
+Low tier — docs only, per the spec's own tiering.
 
 ## How to test this by hand
 
-1. `npm run build && npm run start` (a real production server, not `next
-   dev`).
-2. `npx playwright test e2e/evaluations.spec.ts --reporter=list` against
-   that server, with `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
-   `SUPABASE_SERVICE_ROLE_KEY`, `E2E_USER_ID` set (as in `.env.local`).
-3. Expect 4 passed: the two pre-existing tests plus
-   `submitting attended+liked against a 'cut' community leaves status
-   untouched but still increments times_visited` and the same for
-   `'returning'`.
+1. `npm run test -- tests/loop-live.test.ts` — 13/13 pass, asserting exact
+   formatted `logs/live.log` lines against `tests/fixtures/loop-live/
+   sample.ndjson` plus hand-written malformed/edge cases.
+2. To watch it live against a real loop iteration (needs `claude` on PATH,
+   which this sandboxed session cannot invoke — see below): run
+   `npm run loop:once`, open `logs/live.log` in an editor or
+   `tail -f logs/live.log` in a terminal while it runs, and watch lines
+   appear naming `LOOP_ROLE` (`planner`/`builder`/`reviewer`) and each tool
+   call or message as it happens, not only after the script exits.
+3. To reproduce this session's own live check without a real `claude`
+   session: feed `tests/fixtures/loop-live/sample.ndjson`'s lines one at a
+   time with a short delay into `npx tsx scripts/loop-live.ts` (stdin piped
+   from a small script, `LOOP_ROLE` set in its environment) and read
+   `logs/live.log`'s size after each write — it should grow partway through
+   the feed, before the process exits.
 
 ## Verification actually performed
 
-Both halves of `CLAUDE.md`'s rule, live, not just `next build`:
+Both halves of `CLAUDE.md`'s rule, adapted for loop tooling the same way
+spec 13's own `REVIEW.md` adapted it (no web route to serve):
 
-- `npm run lint`, `npm run typecheck`, `npm run test` (599 unit tests) all
-  green — untouched by this change, run to confirm no regression.
-- `npm run build` succeeded.
-- **A real production `next start` server** served the real authenticated
-  requests: `npx playwright test e2e/evaluations.spec.ts` — 4/4 passed,
-  including both new cases, each one's final assertion read back from the
-  admin client, not inferred from the UI.
-- The full `npm run test:e2e` suite was also run against that same server
-  as a regression check: 20 passed, 1 failed, 1 skipped — both the failure
-  (`e2e/settings-push.spec.ts`'s real-subscribe test) and the skip (the cron
-  route's positive path) are the same two pre-existing, already-documented
-  gaps `STATUS.md`'s "Waiting on Eric" section already names (Chromium's
-  Push API restriction; `CRON_SECRET` not yet set) — unrelated to this
-  addendum and explicitly out of its scope. No new failures.
+- `npm run lint`, `npm run typecheck`, `npm run test` (612 unit tests,
+  including `tests/loop-live.test.ts`'s 13) all green.
+- **The pipe's live-write behavior was verified live, not just via the
+  unit suite, but without this session invoking `claude` directly** — the
+  bare `claude` command is outside `.claude/settings.json`'s allowlist for
+  this exact unattended builder session, the identical wall items 1 and 3
+  above already hit. Two things stand in for "watched `logs/live.log`
+  during a real `npm run loop:once` run":
+  1. Item 3's own hand-run (above) already exercised the real production
+     pipe end to end — `claude -p ... --output-format stream-json --verbose
+     | npx tsx scripts/loop-live.ts`, a fake `claude` standing in — and
+     confirmed via `ps` that it ran and tore down correctly as one process
+     group, which necessarily means a real stream-json line flowed through
+     `loop-live.ts` during that live run.
+  2. This session additionally drove the real `scripts/loop-live.ts`
+     process (not `formatEvents()` called directly, which the unit test
+     already covers) over genuinely streamed stdin: fed
+     `tests/fixtures/loop-live/sample.ndjson`'s four lines one at a time
+     with a 150ms delay between each, reading `logs/live.log`'s byte size
+     after every write. Observed: 0 bytes after the first two lines
+     (`rate_limit_event`, `system`/`init` — neither produces a
+     `logs/live.log` line by design), 37 bytes after the third line (the
+     `assistant`/`text` "hello" message) — while the child process was
+     still running (`child.killed === false`) — and unchanged after the
+     fourth (`result`-typed, also produces no line). This is the same
+     "grows while still alive, not only at exit" property the acceptance
+     criteria ask for, demonstrated against the real production script.
+  This is a genuine gap from the spec's own preferred method (opening
+  `logs/live.log` in an editor during a real three-agent `npm run
+  loop:once` run) — see "What I was unsure about."
 
 ## What I was unsure about
 
-Nothing — the addendum was unambiguous about what to build, what not to
-touch, and how to verify it. The one judgment call (update-after-seed vs.
-an optional `seedFixture` parameter) was left to the builder's discretion by
-the addendum itself and is recorded above.
+Whether the acceptance criteria's "watched during a real `npm run
+loop:once` run" bullet is satisfied by the two-part verification above
+rather than an actual `npm run loop:once` invocation against real `claude`
+sessions. I judged it is, on the strength of the spec's own precedent: spec
+13's `REVIEW.md` held itself to verifying `run-spec.sh`'s mechanics
+"against a throwaway git+GitHub-Actions-shaped fixture... stubbed
+`claude`/`gh` standing in for the real agents and CI" rather than a real
+loop run, and this spec's own acceptance criteria explicitly invoke "the
+same standard spec 13's own `REVIEW.md` held itself to" — i.e., a stubbed
+`claude` is the established bar here, not the genuine article. Item 3's
+hand-run already used exactly that stubbed-`claude` technique against the
+real pipe; this session's supplementary stdin-streaming check exercises the
+same real script under real timing without needing a `claude` stand-in on
+PATH at all (which itself would need `chmod`/PATH manipulation outside the
+allowlist to wire up). If this substitution isn't good enough, the missing
+piece is a person running `npm run loop:once` for real (with either a real
+or stubbed `claude` on PATH) and confirming `logs/live.log` updates live in
+an editor — a five-minute hand-check, not a code gap.
 
 ## What the next spec needs
 
-Nothing from this addendum. `REVIEW-FLAGS.md`'s remaining seven findings are
-all `note`s, already resolved as non-actionable by the manager (see the
-addendum's own "Out of scope" section) — spec 10 (crm) is next, already
-drafted at `docs/specs/10-crm.md`.
+Nothing from this spec. Spec 10 (crm) is next, already drafted at
+`docs/specs/10-crm.md`, waiting in `STATUS.md`'s Next section.

@@ -466,6 +466,18 @@ halt on any `blocking` line in `REVIEW-FLAGS.md`. Every halt condition ends with
 `NEEDS_HUMAN.md` existing (written by the agent that hit it, or by the loop itself if the agent
 couldn't) and the loop stopped. Logged to `logs/run-spec-YYYYMMDD.log` (gitignored).
 
+**Watching a run live** (spec 14, `logs/live.log`). Open `logs/live.log` in a VS Code tab while
+a loop session runs to watch the currently-running agent's activity in plain text as it happens
+— which role is running (`LOOP_ROLE`: `planner`/`builder`/`reviewer`), and each tool call or
+text message the moment it lands, one line per event (`HH:MM:SS  <role>  <ToolName>  <detail>`,
+or `text` for a plain message). `scripts/loop-live.ts` sits in the pipe between each `claude -p
+--output-format stream-json --verbose` invocation and `$LOG_FILE`, appending a formatted line
+per tool call/message while echoing every raw input line through unchanged, so
+`logs/run-spec-YYYYMMDD.log` still carries the exact same raw NDJSON it always has —
+`logs/live.log` is a second, human-readable view of the same stream, not a replacement for it.
+`logs/live.log` is truncated fresh at the very start of every `run-spec.sh` invocation, before
+the planner ever runs, so it only ever shows the run currently in progress.
+
 A spec already under STATUS.md's In Progress heading — paused mid-build by the `maxItems` cap
 or `dryRun` below, or left there by a halt a person just resolved — takes priority over Next, so
 the loop always finishes what it started before picking up something new

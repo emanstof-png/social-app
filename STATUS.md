@@ -45,14 +45,13 @@
 - Read `docs/specs/dojo-and-practice-layer-note.md` before drafting spec 09 or spec 11 — a sharper problem statement and an unscoped "dojo" practice layer that may change what either spec is for.
 
 ## Next
-- [LOOP] spec 15 e2e-real-chrome (draft spec first), pulled forward ahead of 11 for the same reason 12a/13/14 moved: it changes how every later spec's e2e coverage is written.
 - **Real fix still open:** buy OpenRouter credit, or find another confirmed-working free model, for the seven components currently stopgapped onto `gemini-3.6-flash` (see the note above). Until then every component shares one provider, so a bad afternoon on Gemini's free tier affects all of them at once. **Confirmed still biting the E2E_USER_ID account specifically** during the spec 03 rework addendum's live verification (2026-09-08): its `persona_synthesis` row still points at `minimax/minimax-m3:free`, which 404s. Re-seeding or hand-fixing that one account's `model_settings` would let the addendum's success path (not just its failure path) be observed live.
 - **Existing accounts' already-seeded `model_settings` rows were not touched by the default-model fix** — only new seeds get `gemini-3.6-flash`. Check `/settings` (or the table directly) for any account onboarded before 2026-09-07 that still carries `minimax/minimax-m3:free` or `z-ai/glm-5.2:free` on a component it actually uses.
 - 12a item 2: assessment test DONE (spec 04 item 6). Event selection DONE (spec 07 item 7, `e2e/feed.spec.ts`). Spec 05 deliberately adds no e2e suite — see its REVIEW.md.
 - **Shared working-tree problem, found 2026-09-12 during spec 10's build:** the pre-commit hook runs a full `npm run typecheck` over the whole tree, so any manager-session commit (docs, `STATUS.md`) attempted while the loop's builder has its own in-progress, uncommitted files checked out makes the tree uncommittable for every other seat — not just a race on the same file, a whole-tree typecheck failing on someone else's half-finished work. Worked around once by hand (`git stash push -- <path>`, re-apply once the tree is idle) rather than fixed. **Candidate fix, not implemented here:** run the loop in its own `git worktree` on its own branch with its own index, so the builder's in-progress files never sit in the same working tree the manager commits docs/STATUS/tags from. This is loop tooling, so per `docs/agents/MANAGER.md` it goes through the loop as its own spec (like 13 and 14 did), not built directly in a manager session.
 
 ## In Progress
-- (nothing in progress)
+- [LOOP] spec 15 e2e-real-chrome — build starting, from `docs/specs/15-e2e-real-chrome.md`.
 
 ## Blocked
 - (nothing blocking the next spec)

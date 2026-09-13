@@ -120,8 +120,10 @@ importing `test`/`expect` from `@playwright/test` directly.
    Chrome newly provides is the Push API existing in the browser at all;
    the permission grant was never the blocked half of this gap.
 
-   **`e2e/settings-push.spec.ts` gains one assertion, its only test-content
-   change.** Its "enabling creates one row for this browser; disabling
+   **`e2e/settings-push.spec.ts` gains one assertion, and (per the Risks
+   section's Resolved note below, added 2026-09-13 after the first build
+   attempt) a bounded retry — its only test-content changes.** Its
+   "enabling creates one row for this browser; disabling
    deletes it" test already reads back `id, endpoint` from
    `push_subscriptions` but only asserts the row count. This spec adds an
    assertion on `endpoint`'s own shape — a real push-service URL
@@ -267,8 +269,20 @@ touch, since real Chrome has nothing to do with a missing secret.
   remain under `os.tmpdir()` — proving the fixture's teardown actually
   removes each per-test profile rather than leaking one per test.
 - Running `npx playwright test e2e/settings-push.spec.ts` twice in a row,
-  back to back, both passes — proving the per-test temp profile actually
-  isolates state rather than merely passing once by accident.
+  back to back, both passes (an individual attempt may use one of its
+  configured retries per the Resolved note above — that is expected, not a
+  failure) — proving the per-test temp profile actually isolates state
+  rather than merely passing once by accident.
+- **Resolved 2026-09-13 (see the Risks section's Resolved note):**
+  `e2e/settings-push.spec.ts`'s own `describe` block sets
+  `test.describe.configure({ retries: 2 })` with a per-test timeout raised
+  to give `pushManager.subscribe()` up to 60s per attempt, and no other
+  spec file gains retries. The full `npm run test:e2e` run is green both
+  locally (against a real `next start` server) and in CI, and the
+  Playwright HTML report for that run shows the configured retry ceiling
+  for `settings-push.spec.ts` (present whether or not any attempt actually
+  needed a retry). If all retries are exhausted the test fails outright —
+  it must not be converted to a skip as part of this spec.
 - `login.spec.ts`'s "signed out, a gated route redirects to /login" test
   still passes when run as part of the full suite, not only in isolation —
   proving the new persistent-context fixture does not leak a session or a
@@ -311,6 +325,44 @@ failed and how, and halt — this is Eric's decision to make, between a
 documented CI-only skip (with the reason recorded, not silently dropped) and
 running that one test headed, not headless, in CI. Both are legitimate
 outcomes; neither is this spec's own call to make unilaterally.
+
+**Resolved by Eric, 2026-09-13 (`NEEDS_HUMAN.md` / GitHub issue #10).** The
+builder's investigation found the flakiness reproducing locally, not only
+hypothetically in CI: the app itself is not at fault (`subscribeToPush`
+completes correctly and writes a real `fcm.googleapis.com` endpoint when it
+succeeds), but `registration.pushManager.subscribe()` — the real
+browser-level GCM/FCM handshake, outside the app's own code — sometimes
+does not resolve within 15-20s. Running the test twice back-to-back
+reproduced pass-then-fail on a fresh profile each time (ruling out
+fixture/state leakage); a headed diagnostic run still hung once in two
+attempts, so headed alone is not a reliable fix on its own.
+
+**Decision: option 3, a bounded retry, not a skip.** In
+`e2e/settings-push.spec.ts` only: `test.describe.configure({ retries: 2 })`
+scoped to that file's own `describe` block (no change to
+`playwright.config.ts`'s suite-wide `retries: 1`, and no retries added
+anywhere else in the suite), plus a raised per-test timeout so the
+`pushManager.subscribe()` step gets up to 60s on each attempt. The
+assertion on a real `fcm.googleapis.com`/`android.googleapis.com` endpoint
+(added earlier in this spec) is unchanged — a retry gets a genuinely
+correct result, not a weaker check of one. After all retries are exhausted
+the test **fails, it does not skip**: three consecutive real hangs is a
+real signal (a genuinely broken push path, not transient GCM flake) and
+must stay red rather than be silently absorbed.
+
+**Fallback, written down now but not applied unless it happens.** If CI
+shows this specific test failing after retries on three consecutive CI
+runs with no app-code change in between, convert it to a documented
+CI-only skip (it keeps running locally) with the reason recorded in a
+comment directly next to the skip — not decided or built now, since it
+has not yet happened; a future session hits this bullet only if that
+pattern actually occurs.
+
+**Acceptance criteria for this resolution, added to the list below:** the
+full `npm run test:e2e` suite is green locally against a real `next start`
+server, with `settings-push.spec.ts`'s retry count visible in the
+Playwright HTML report (even a 0-retry pass should show the configured
+retry ceiling was in effect); the same holds in CI.
 
 ## Out of scope
 

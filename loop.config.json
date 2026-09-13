@@ -4,7 +4,7 @@
   "dryRun": false,
   "push": false,
   "haltBeforeMigration": false,
-  "timeoutMinutes": 180,
+  "timeoutMinutes": 30,
 
   "_comments": {
     "specs": "How many specs npm run loop will build in this invocation before stopping on its own, regardless of how each one goes. It still pauses for your go-ahead between every spec even within this budget (see docs/ARCHITECTURE.md's Build loop section) -- this only caps the total so an unattended run cannot silently continue forever. Default 1: build one spec, report, stop.",

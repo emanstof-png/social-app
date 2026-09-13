@@ -84,6 +84,18 @@ High-tier stop, not something to retry a different way — write
 `NEEDS_HUMAN.md` naming the exact command and why the spec needed it, and
 stop.
 
+Run every verification command in the foreground, awaited to completion in
+the same turn: `npm run lint`/`typecheck`/`test`, `next build`,
+`npm run test:e2e`, or any other check a scope item's own tests require.
+Never background a long-running command and wait for a notification of its
+result — this session is a one-shot, stateless invocation with no later
+turn for such a notification to land on. Spec 15's first build attempt
+backgrounded its `npm run test:e2e` run, waited on a notification that
+could never arrive, then ended without committing; a fresh session had to
+resume the same uncommitted tree by hand. The only way a verification
+command's result reaches this session at all is running it synchronously
+and reading its output directly.
+
 If every scope item finishes (nothing High-tier, or the only High-tier item
 was the deliberate one a test spec plants), write `REVIEW.md` at the repo
 root exactly as CLAUDE.md describes: spec number, what was built, how to test

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import {
   focusState,
+  isFromCurrentAssessment,
   seasonPlan,
   type PlanActivity,
 } from "@/lib/activities/plan";
@@ -31,10 +32,14 @@ export function ActivitiesView({
   activities,
   cap,
   canSuggest,
+  currentAssessment,
 }: {
   activities: PlanActivity[];
   cap: number;
   canSuggest: boolean;
+  /** Spec 18 item 6: which assessment is current, for the "From your <date>
+   * assessment" line on rows it seeded. Null before any assessment exists. */
+  currentAssessment: { id: string; generatedAt: string } | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -215,6 +220,7 @@ export function ActivitiesView({
             activity={activity}
             busy={busy}
             pending={pending}
+            currentAssessment={currentAssessment}
             onStatus={(status) =>
               change(setStatus, `status-${activity.id}`, { id: activity.id, status })
             }
@@ -238,6 +244,7 @@ export function ActivitiesView({
                 activity={activity}
                 busy={busy}
                 pending={pending}
+                currentAssessment={currentAssessment}
                 onStatus={(status) =>
                   change(setStatus, `status-${activity.id}`, { id: activity.id, status })
                 }
@@ -265,18 +272,22 @@ function ActivityCard({
   activity,
   busy,
   pending,
+  currentAssessment,
   onStatus,
   onKind,
 }: {
   activity: PlanActivity;
   busy: string | null;
   pending: boolean;
+  currentAssessment: { id: string; generatedAt: string } | null;
   onStatus: (status: ActivityStatus) => void;
   onKind: (kind: ActivityKind) => void;
 }) {
   const labels = STATUS_LABELS[activity.kind];
   const otherKind: ActivityKind =
     activity.kind === "recurring_community" ? "one_off_source" : "recurring_community";
+
+  const isNew = isFromCurrentAssessment(activity, currentAssessment?.id ?? null);
 
   return (
     <article className="rounded-lg border border-black/10 p-4 dark:border-white/15">
@@ -290,6 +301,12 @@ function ActivityCard({
 
       {activity.rationale && (
         <p className="mt-1.5 text-sm opacity-75">{activity.rationale}</p>
+      )}
+
+      {isNew && currentAssessment && (
+        <p className="mt-1 text-xs opacity-60">
+          From your {new Date(currentAssessment.generatedAt).toLocaleDateString()} assessment
+        </p>
       )}
 
       <div className="mt-3 flex flex-wrap items-center gap-2">

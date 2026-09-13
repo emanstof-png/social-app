@@ -20,7 +20,7 @@ import { focusCap } from "@/lib/schemas/profile";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
   readActivities,
-  readAnswers,
+  readRunAnswers,
   readAssessment,
   readProfile,
   type Db,
@@ -102,7 +102,7 @@ export async function suggestActivities(
 
     const [assessment, answers, existing, profile] = await Promise.all([
       readAssessment(supabase, userId),
-      readAnswers(supabase, userId),
+      readRunAnswers(supabase, userId),
       readActivities(supabase, userId),
       readProfile(supabase, userId),
     ]);
@@ -406,7 +406,7 @@ export async function addActivity(
     if (error) throw new Error(`Could not add that activity: ${error.message}`);
 
     if (roomFor) {
-      const added: PlanActivity = { ...row, id: data.id as string };
+      const added: PlanActivity = { ...row, id: data.id as string, assessment_id: null };
       await advanceIfFocused(supabase, userId, [...activities, added], cap);
     }
 

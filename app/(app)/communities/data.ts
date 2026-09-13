@@ -112,7 +112,9 @@ export async function readActivities(
 ): Promise<PlanActivity[]> {
   const { data, error } = await supabase
     .from("activities")
-    .select("id, name, rationale, source, status, kind, fit_score, kind_edited_by_user")
+    .select(
+      "id, name, rationale, source, status, kind, fit_score, kind_edited_by_user, assessment_id",
+    )
     .eq("user_id", userId)
     .order("created_at", { ascending: true });
 
@@ -129,6 +131,7 @@ export async function readActivities(
         kind: true,
         fit_score: true,
         kind_edited_by_user: true,
+        assessment_id: true,
       })
       .parse(row),
   );

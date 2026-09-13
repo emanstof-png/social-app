@@ -10,6 +10,7 @@ export * from "./common";
 export * from "./enums";
 export * from "./profile";
 export * from "./assessment";
+export * from "./assessment-run";
 export * from "./activity";
 export * from "./community";
 export * from "./event";

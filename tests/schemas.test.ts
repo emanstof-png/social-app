@@ -30,6 +30,7 @@ const rowSchemas: Record<string, z.ZodObject> = {
   profiles: schemas.profileRow,
   assessment_answers: schemas.assessmentAnswerRow,
   assessments: schemas.assessmentRow,
+  assessment_runs: schemas.assessmentRunRow,
   activities: schemas.activityRow,
   communities: schemas.communityRow,
   events: schemas.eventRow,
@@ -126,6 +127,7 @@ describe("row schemas reject bad data", () => {
     kind: "recurring_community",
     fit_score: 82,
     kind_edited_by_user: false,
+    assessment_id: null,
   };
 
   it("accepts a realistic activity row", () => {
@@ -260,6 +262,7 @@ describe("assessments.desired_activities carries the rationale (spec 03)", () =>
     assessment_types_used: ["social_style"],
     generated_at: "2026-09-06T10:00:00+00:00",
     model_run_id: "33333333-3333-4333-8333-333333333333",
+    run_id: "44444444-4444-4444-8444-444444444444",
     created_at: "2026-09-06T10:00:00+00:00",
     updated_at: "2026-09-06T10:00:00+00:00",
   };

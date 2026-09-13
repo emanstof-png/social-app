@@ -1,6 +1,7 @@
 import Link from "next/link";
 
-import { isComplete, progressFrom, type StoredAnswer } from "@/lib/assessments/flow";
+import { isComplete, progressFrom } from "@/lib/assessments/flow";
+import { hasEarlierRun, listRuns, pickCurrentRun, readRunAnswers, startRun } from "@/lib/assessments/runs";
 import { hasConfiguredModels } from "@/lib/onboarding";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { loadResultsPhase } from "./data";
@@ -67,16 +68,31 @@ export default async function AssessmentPage() {
     );
   }
 
-  const { data: answerRows, error: answersError } = await supabase
-    .from("assessment_answers")
-    .select("question_id, question_text, answer")
-    .eq("user_id", user!.id);
-
-  if (answersError) {
-    return <Failure message={`Could not read your answers: ${answersError.message}`} />;
+  // Spec 18: the current run is the newest by started_at, created here when
+  // the user has none yet -- a brand new user's very first page visit.
+  let runs;
+  try {
+    runs = await listRuns(supabase, user!.id);
+  } catch (cause) {
+    return <Failure message={cause instanceof Error ? cause.message : String(cause)} />;
   }
 
-  const answers = (answerRows ?? []) as StoredAnswer[];
+  const existingRun = pickCurrentRun(runs);
+  let run;
+  try {
+    run = existingRun ?? (await startRun(supabase, user!.id));
+  } catch (cause) {
+    return <Failure message={cause instanceof Error ? cause.message : String(cause)} />;
+  }
+
+  const previousRunExists = existingRun ? hasEarlierRun(runs, existingRun.id) : false;
+
+  let answers;
+  try {
+    answers = await readRunAnswers(supabase, user!.id, run.id);
+  } catch (cause) {
+    return <Failure message={cause instanceof Error ? cause.message : String(cause)} />;
+  }
 
   // A corrupt closing marker raises rather than being guessed around
   // (CLAUDE.md: fail loudly). Surface it instead of a blank page.
@@ -103,12 +119,13 @@ export default async function AssessmentPage() {
             progress: progressFrom(answers),
             answered: answeredSummaries(answers),
           }}
+          hasPreviousRun={previousRunExists}
         />
       </div>
     );
   }
 
-  const phase = await loadResultsPhase(supabase, user!.id, answers);
+  const phase = await loadResultsPhase(supabase, user!.id, run, answers);
 
   if (phase.kind === "malformed") {
     return <Failure message={phase.message} />;
@@ -128,6 +145,7 @@ export default async function AssessmentPage() {
       inventories={phase.inventories}
       version={phase.version}
       totalVersions={phase.totalVersions}
+      previous={phase.previous}
     />
   );
 }

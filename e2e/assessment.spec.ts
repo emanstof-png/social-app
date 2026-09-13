@@ -81,10 +81,34 @@ async function magicLinkTokenHash(admin: SupabaseClient, email: string): Promise
   return tokenHash;
 }
 
-type SeedRow = { user_id: string; question_id: string; question_text: string; answer: string };
+type SeedRow = {
+  user_id: string;
+  run_id: string;
+  question_id: string;
+  question_text: string;
+  answer: string;
+};
 
-function addRow(rows: SeedRow[], userId: string, question_id: string, question_text: string, answer: string) {
-  rows.push({ user_id: userId, question_id, question_text, answer });
+function addRow(
+  rows: SeedRow[],
+  userId: string,
+  runId: string,
+  question_id: string,
+  question_text: string,
+  answer: string,
+) {
+  rows.push({ user_id: userId, run_id: runId, question_id, question_text, answer });
+}
+
+/** Inserts a new run (spec 18) and returns its id, for the seed rows below. */
+async function seedRun(admin: SupabaseClient, userId: string): Promise<string> {
+  const { data, error } = await admin
+    .from("assessment_runs")
+    .insert({ user_id: userId })
+    .select("id")
+    .single();
+  if (error) throw new Error(`Could not seed a run: ${error.message}`);
+  return data.id as string;
 }
 
 /**
@@ -96,12 +120,13 @@ function addRow(rows: SeedRow[], userId: string, question_id: string, question_t
  * fixed about-you question is served entirely by deterministic code either
  * way, which is what this test actually checks.
  */
-function seedPartialRows(userId: string): SeedRow[] {
+function seedPartialRows(userId: string, runId: string): SeedRow[] {
   const rows: SeedRow[] = [];
   for (const question of ABOUT_YOU_QUESTIONS.slice(0, -1)) {
     addRow(
       rows,
       userId,
+      runId,
       `about_you:${question.key}`,
       question.text,
       question.choices ? question.choices[0] : "Long walks on my own, mostly.",
@@ -116,12 +141,13 @@ function seedPartialRows(userId: string): SeedRow[] {
  * test below, which seeds its own `assessments` row and never submits
  * through the UI, so finishing the interview here never reaches `after()`.
  */
-function seedCompleteRows(userId: string): SeedRow[] {
-  const rows = seedPartialRows(userId);
+function seedCompleteRows(userId: string, runId: string): SeedRow[] {
+  const rows = seedPartialRows(userId, runId);
   const last = ABOUT_YOU_QUESTIONS[ABOUT_YOU_QUESTIONS.length - 1];
   addRow(
     rows,
     userId,
+    runId,
     `about_you:${last.key}`,
     last.text,
     last.choices ? last.choices[0] : "Weeknights after 6.",
@@ -129,28 +155,38 @@ function seedCompleteRows(userId: string): SeedRow[] {
   addRow(
     rows,
     userId,
+    runId,
     "about_you:done",
     "Inventories chosen from the about-you answers",
     encodeInventorySelection([INVENTORY_ID]),
   );
   for (const item of inventoryById(INVENTORY_ID).items) {
-    addRow(rows, userId, `inv:${INVENTORY_ID}:${item.id}`, item.text, "4");
+    addRow(rows, userId, runId, `inv:${INVENTORY_ID}:${item.id}`, item.text, "4");
   }
   return rows;
 }
 
-/** Re-runnable: the suite owns this user's rows and clears them each time. */
+/** Re-runnable: the suite owns this user's rows and clears them each time.
+ * assessment_runs last -- assessment_answers and assessments both reference
+ * it and neither cascades on its delete (spec 18: nothing here ever deletes a
+ * run through the app, so no cascade was added). */
 async function resetUser(admin: SupabaseClient, userId: string): Promise<void> {
-  for (const table of ["activities", "assessments", "assessment_answers"]) {
+  for (const table of ["activities", "assessments", "assessment_answers", "assessment_runs"]) {
     const { error } = await admin.from(table).delete().eq("user_id", userId);
     if (error) throw new Error(`Could not clear ${table}: ${error.message}`);
   }
 }
 
-async function seedAssessment(admin: SupabaseClient, userId: string): Promise<void> {
+async function seedAssessment(
+  admin: SupabaseClient,
+  userId: string,
+  runId: string,
+  summary = "You are happiest in a small group that meets often.\n\nYou warm up slowly.",
+): Promise<void> {
   const { error } = await admin.from("assessments").insert({
     user_id: userId,
-    summary: "You are happiest in a small group that meets often.\n\nYou warm up slowly.",
+    run_id: runId,
+    summary,
     goals: ["Be a regular somewhere within three months"],
     traits: ["steady", "slow to warm"],
     desired_activities: [
@@ -203,7 +239,10 @@ test.describe("assessment", () => {
   test("resumes at the next unanswered question and writes the answer on submit", async ({
     page,
   }) => {
-    const { error } = await admin.from("assessment_answers").insert(seedPartialRows(userId));
+    const runId = await seedRun(admin, userId);
+    const { error } = await admin
+      .from("assessment_answers")
+      .insert(seedPartialRows(userId, runId));
     expect(error, error?.message).toBeNull();
 
     const response = await page.goto("/assessment");
@@ -244,9 +283,12 @@ test.describe("assessment", () => {
     // never submits through the UI, so it never fires the background
     // persona_synthesis job (docs/CONVENTIONS.md#background-work-after-the-
     // response) -- the persona shown here is entirely the seeded row.
-    const { error } = await admin.from("assessment_answers").insert(seedCompleteRows(userId));
+    const runId = await seedRun(admin, userId);
+    const { error } = await admin
+      .from("assessment_answers")
+      .insert(seedCompleteRows(userId, runId));
     expect(error, error?.message).toBeNull();
-    await seedAssessment(admin, userId);
+    await seedAssessment(admin, userId, runId);
 
     const response = await page.goto("/assessment");
     expect(response?.status(), "authenticated /assessment must not error").toBe(200);
@@ -262,6 +304,113 @@ test.describe("assessment", () => {
     await expect(page.getByRole("heading", { name: "Inventory results" })).toBeVisible();
     await expect(
       page.getByRole("heading", { name: inventoryById(INVENTORY_ID).name }),
+    ).toBeVisible();
+  });
+
+  test("starting a new assessment resets the interview and keeps the old run (spec 18 item 4)", async ({
+    page,
+  }) => {
+    const oldRunId = await seedRun(admin, userId);
+    const { error } = await admin
+      .from("assessment_answers")
+      .insert(seedCompleteRows(userId, oldRunId));
+    expect(error, error?.message).toBeNull();
+    await seedAssessment(admin, userId, oldRunId);
+
+    const response = await page.goto("/assessment");
+    expect(response?.status(), "authenticated /assessment must not error").toBe(200);
+    await expect(page.getByRole("heading", { name: "Your assessment" })).toBeVisible();
+
+    await page.getByRole("button", { name: "Start a new assessment" }).click();
+    await page.getByRole("button", { name: "Start over" }).click();
+
+    // A fresh run: question 1, zero progress.
+    await expect(page.getByText(ABOUT_YOU_QUESTIONS[0].text)).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText(/^0 of about /)).toBeVisible();
+
+    // Answering in the new run writes a row carrying the new run_id only
+    // (acceptance criterion 3) -- checked live, not just at the data layer.
+    const newAnswer = "Rock climbing, mostly.";
+    await page.getByRole("textbox").first().fill(newAnswer);
+    await page.getByRole("button", { name: "Next", exact: true }).click();
+
+    await expect
+      .poll(
+        async () => {
+          const { data } = await admin
+            .from("assessment_answers")
+            .select("run_id")
+            .eq("user_id", userId)
+            .eq("question_id", `about_you:${ABOUT_YOU_QUESTIONS[0].key}`)
+            .neq("run_id", oldRunId)
+            .maybeSingle();
+          return data?.run_id ?? null;
+        },
+        { message: "the new run's first answer must reach the database", timeout: 20_000 },
+      )
+      .not.toBeNull();
+
+    // The old run's rows and its assessment are untouched, read back with the
+    // admin client rather than trusted from the UI alone.
+    const { data: oldAnswers, error: oldAnswersError } = await admin
+      .from("assessment_answers")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("run_id", oldRunId);
+    expect(oldAnswersError, oldAnswersError?.message).toBeNull();
+    expect(oldAnswers?.length).toBe(seedCompleteRows(userId, oldRunId).length);
+
+    const { data: oldAssessment, error: oldAssessmentError } = await admin
+      .from("assessments")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("run_id", oldRunId)
+      .maybeSingle();
+    expect(oldAssessmentError, oldAssessmentError?.message).toBeNull();
+    expect(oldAssessment).not.toBeNull();
+  });
+
+  test("the results page shows an earlier run's finished assessment under Previous assessments (spec 18 item 5)", async ({
+    page,
+  }) => {
+    const olderRunId = await seedRun(admin, userId);
+    let insert = await admin
+      .from("assessment_answers")
+      .insert(seedCompleteRows(userId, olderRunId));
+    expect(insert.error, insert.error?.message).toBeNull();
+    await seedAssessment(
+      admin,
+      userId,
+      olderRunId,
+      "Your very first sitting found you cautious and curious in equal parts.",
+    );
+
+    const currentRunId = await seedRun(admin, userId);
+    insert = await admin
+      .from("assessment_answers")
+      .insert(seedCompleteRows(userId, currentRunId));
+    expect(insert.error, insert.error?.message).toBeNull();
+    await seedAssessment(admin, userId, currentRunId);
+
+    const response = await page.goto("/assessment");
+    expect(response?.status(), "authenticated /assessment must not error").toBe(200);
+    await expect(page.getByRole("heading", { name: "Your assessment" })).toBeVisible();
+
+    const history = page.getByText("Previous assessments (1)");
+    await expect(history).toBeVisible();
+    await history.click();
+
+    const collapsedRow = page
+      .getByText("Your very first sitting found you cautious and curious in equal parts.")
+      .first();
+    await expect(collapsedRow).toBeVisible();
+    await collapsedRow.click();
+
+    await expect(
+      page.getByText(
+        "Your very first sitting found you cautious and curious in equal parts.",
+        { exact: true },
+      ),
     ).toBeVisible();
   });
 });

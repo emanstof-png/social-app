@@ -10,9 +10,10 @@
 
 ## Data model (Supabase tables)
 - `profiles` — user, timezone, home location (Arlington), onboarding state. From the spec 03 rework addendum: `dial_budget`, `dial_sobriety`, `dial_physical`, `dial_location`, `dial_schedule` (all nullable text) — the Settings dials, null until touched, overriding the matching `about_you:<key>` assessment answer once set (`constraintsFrom` in `lib/activities/plan.ts`).
-- `assessment_answers` — question_id, question_text, answer, asked_at. Written per answer.
-- `assessments` — generated persona: summary, goals, traits, desired_activities (jsonb), assessment_types_used, generated_at, model_run_id.
-- `activities` — name, rationale, source (assessment | suggested | user), status (active | benched | cut).
+- `assessment_runs` — one row per sitting of the interview (spec 18): user_id, started_at, completed_at (null until the interview finishes). No status column; the current run is the newest by started_at.
+- `assessment_answers` — question_id, question_text, answer, asked_at, run_id (spec 18: which run this answer belongs to; unique on (run_id, question_id)). Written per answer.
+- `assessments` — generated persona: summary, goals, traits, desired_activities (jsonb), assessment_types_used, generated_at, model_run_id, run_id (spec 18: which run produced it).
+- `activities` — name, rationale, source (assessment | suggested | user), status (active | benched | cut). From spec 18: assessment_id (nullable, references assessments) — which assessment seeded the row, null for anything not seeded from one, set only by `seedFromAssessment`.
 - `communities` — name, activity_id, type (community_event | community_general | one_off_source), website, calendar_url, calendar_kind (ics | html | api | manual), location, cost, discovered_at, status (todo | went_once | returning | cut | archived), user_notes, genre_liked (bool null), focus (bool — "one of my few current communities"), and from spec 05: source_url, evidence (jsonb), discovery_run_id, why_relevant. Discovery writes the facts; the user owns status/focus/user_notes/genre_liked and discovery never writes those. From spec 06: calendar_kind_checked_at (nullable timestamptz) — when calendar-kind detection last ran, so an unreachable calendar is not re-probed on every page load. From the spec 07 calendar/community-fields addendum (migration 0014): times_visited (integer, not null, default 0) and rating (smallint 1-5, nullable) — both user-owned and manually editable on the Community card today; spec 09's evaluation flow will later write them automatically from real attendance.
 - `discovery_runs` — activity_id, location, status (running | complete | failed | empty), rounds_done, searches_used, pages_read, communities_found, empty_rounds, last_error, started_at, finished_at. One row per discovery run; a run advances one round per request, so this is also what makes an interrupted run resumable (spec 05).
 - `search_log` — provider (exa | tavily | serper), query, discovery_run_id, result_count, status, error_kind, error_message, latency_ms. One row per search API call, successful or not, so a fall-through is visible rather than inferred. Separate from `run_log` because a search call has no tokens, no cost and no output schema, and does have a query and a result count (spec 05).
@@ -39,6 +40,31 @@ About-you (`lib/assessments/catalogue.ts#ABOUT_YOU_QUESTIONS`) is a fixed static
 **Background work after the response** (see `docs/CONVENTIONS.md#background-work-after-the-response`). The moment the last inventory answer completes the interview, `submitAnswer` fires `persona_synthesis` in an `after()` callback (`next/server`) and returns without waiting on it. `app/(app)/assessment/data.ts`'s `loadResultsPhase` is what the results view reads instead: `results` once the `assessments` row exists, `failed` when the most recent `persona_synthesis` `run_log` row is an error newer than it, `cogitating` otherwise. `app/(app)/assessment/generating.tsx`'s `Cogitating` polls with `router.refresh()`; `GatewayFailure` reuses the interview's own failure UI and offers the same manual "Regenerate" action, now the retry path.
 
 **Settings dials.** `profiles.dial_budget/sobriety/physical/location/schedule` (migration 0013) are live overrides of the matching `about_you:<key>` answer, editable on `/settings` (`app/(app)/settings/dials.tsx`). `constraintsFrom` in `lib/activities/plan.ts` prefers a non-null dial over the stored answer. Changing a dial offers "Find more activities" (re-runs `activity_suggestion`, `app/(app)/settings/actions.ts#findMoreActivitiesFromSettings`) and "Find more communities" (advances spec 05 discovery by one round for every currently focused activity, `findMoreCommunitiesFromSettings`) — both call the same underlying actions `/activities` and `/communities` already use, not new logic.
+
+## Assessment runs (spec 18)
+
+Every interview is a run (`assessment_runs`, migration 0019), not a single flat
+set of answers per user. A run is created the first time a person visits
+`/assessment` with none yet, or by the "Start a new assessment" action; from
+then on every read and write in `app/(app)/assessment/actions.ts` resolves
+`currentRun` first (`lib/assessments/runs.ts`) and scopes itself to that run's
+`run_id`. The current run is simply the newest by `started_at` -- there is no
+status column, since the two states that matter are already derivable:
+`completed_at` set means finished, and not being the newest means superseded.
+Nothing is ever deleted across runs: an old run's answers and its `assessments`
+row stay exactly where they are, which is what lets the results page show a
+"Previous assessments" history (`app/(app)/assessment/data.ts#
+loadResultsPhase`, reusing `answeredSummaries` for each old run's read-only
+transcript). `redoPhase` keeps its old within-run delete -- that is a person's
+own correction of the sitting they are in, not a reset.
+
+Starting a new run does not touch `onboarding_state`: a person reflecting again
+has already onboarded, and every post-onboarding page's gate must not regress.
+`app/(app)/activities/data.ts`'s `seedFromAssessment` keeps working exactly as
+spec 04 built it (reads the latest assessment, inserts what is missing) and
+additionally stamps `activities.assessment_id`, so `/activities` can show a
+quiet "From your \<date\> assessment" line on a row the current run introduced
+(`isFromCurrentAssessment` in `lib/activities/plan.ts`).
 
 ## Discovery (spec 05)
 Deterministic-first. The models fill two narrow joints and decide nothing else.

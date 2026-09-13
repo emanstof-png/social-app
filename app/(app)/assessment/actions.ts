@@ -23,6 +23,7 @@ import {
   type StoredAnswer,
 } from "@/lib/assessments/flow";
 import { isCatalogueId } from "@/lib/assessments/catalogue";
+import { completeRun, currentRun, readRunAnswers, startRun } from "@/lib/assessments/runs";
 import { GatewayError } from "@/lib/llm/errors";
 import { runComponent } from "@/lib/llm/gateway-server";
 import type { personaSynthesisOutput } from "@/lib/llm/components/persona-synthesis";
@@ -61,32 +62,22 @@ async function currentUser(): Promise<{ supabase: Db; userId: string }> {
   return { supabase, userId: user.id };
 }
 
-async function readAnswers(supabase: Db, userId: string): Promise<StoredAnswer[]> {
-  const { data, error } = await supabase
-    .from("assessment_answers")
-    .select("question_id, question_text, answer")
-    .eq("user_id", userId);
-
-  if (error) {
-    throw new Error(`Could not read your answers: ${error.message}`);
-  }
-  return (data ?? []) as StoredAnswer[];
-}
-
 /**
- * Writes one answer. Idempotent by question_id: re-answering a question updates
- * the row it already has rather than adding a second one, and nothing is ever
- * deleted here (spec 03 item 4).
+ * Writes one answer. Idempotent by (run_id, question_id): re-answering a
+ * question within the same run updates the row it already has rather than
+ * adding a second one, and nothing is ever deleted here (spec 03 item 4).
  */
 async function writeAnswer(
   supabase: Db,
   userId: string,
+  runId: string,
   row: StoredAnswer,
 ): Promise<void> {
   const { data: existing, error: readError } = await supabase
     .from("assessment_answers")
     .select("id")
     .eq("user_id", userId)
+    .eq("run_id", runId)
     .eq("question_id", row.question_id)
     .maybeSingle();
 
@@ -105,6 +96,7 @@ async function writeAnswer(
 
   const { error } = await supabase.from("assessment_answers").insert({
     user_id: userId,
+    run_id: runId,
     question_id: row.question_id,
     question_text: row.question_text,
     answer: row.answer,
@@ -159,6 +151,7 @@ const interviewReply = z.object({
 async function currentQuestion(
   supabase: Db,
   userId: string,
+  runId: string,
   answers: StoredAnswer[],
 ): Promise<{ question: Question | null; answers: StoredAnswer[] }> {
   let working = answers;
@@ -189,7 +182,7 @@ async function currentQuestion(
           suggested.length > 0 ? suggested.slice(0, 2) : FALLBACK_INVENTORIES,
         ),
       };
-      await writeAnswer(supabase, userId, marker);
+      await writeAnswer(supabase, userId, runId, marker);
       working = [...working, marker];
       continue;
     }
@@ -245,12 +238,14 @@ function describe(cause: unknown): string {
 async function stateFrom(
   supabase: Db,
   userId: string,
+  runId: string,
   answers: StoredAnswer[],
 ): Promise<InterviewState> {
   try {
     const { question, answers: settled } = await currentQuestion(
       supabase,
       userId,
+      runId,
       answers,
     );
     const progress = progressFrom(settled);
@@ -272,8 +267,9 @@ async function stateFrom(
 /** Loads the current question. Also the Retry action after a gateway failure. */
 export async function loadQuestion(): Promise<InterviewState> {
   const { supabase, userId } = await currentUser();
-  const answers = await readAnswers(supabase, userId);
-  return stateFrom(supabase, userId, answers);
+  const run = await currentRun(supabase, userId);
+  const answers = await readRunAnswers(supabase, userId, run.id);
+  return stateFrom(supabase, userId, run.id, answers);
 }
 
 // -- Answering ----------------------------------------------------------------
@@ -298,7 +294,8 @@ export async function submitAnswer(
   formData: FormData,
 ): Promise<InterviewState> {
   const { supabase, userId } = await currentUser();
-  let answers = await readAnswers(supabase, userId);
+  const run = await currentRun(supabase, userId);
+  let answers = await readRunAnswers(supabase, userId, run.id);
 
   try {
     const parsed = submission.safeParse({
@@ -317,7 +314,7 @@ export async function submitAnswer(
     const { question_id, question_text, answer } = parsed.data;
     const firstAnswer = answers.length === 0;
 
-    await writeAnswer(supabase, userId, { question_id, question_text, answer });
+    await writeAnswer(supabase, userId, run.id, { question_id, question_text, answer });
     answers = [
       ...answers.filter((row) => row.question_id !== question_id),
       { question_id, question_text, answer },
@@ -326,13 +323,16 @@ export async function submitAnswer(
     // Onboarding step 2 begins with the very first answer (spec 03 item 4).
     if (firstAnswer) await setOnboarding(supabase, userId, "assessment_started");
 
-    // The interview just finished on this answer: fire persona_synthesis in
-    // the background and return without waiting on it (spec 03 rework
-    // addendum; docs/CONVENTIONS.md#background-work-after-the-response). The
-    // results view polls for the assessments row this writes.
+    // The interview just finished on this answer: mark the run complete,
+    // fire persona_synthesis in the background and return without waiting on
+    // it (spec 03 rework addendum; docs/CONVENTIONS.md#background-work-after-
+    // the-response). The results view polls for the assessments row this
+    // writes.
     if (isComplete(answers)) {
+      await completeRun(supabase, run.id);
       const finishedAnswers = answers;
-      after(() => synthesizePersona(supabase, userId, finishedAnswers));
+      const runId = run.id;
+      after(() => synthesizePersona(supabase, userId, runId, finishedAnswers));
     }
 
     revalidatePath("/assessment");
@@ -345,7 +345,7 @@ export async function submitAnswer(
     };
   }
 
-  return stateFrom(supabase, userId, answers);
+  return stateFrom(supabase, userId, run.id, answers);
 }
 
 // -- Persona synthesis --------------------------------------------------------
@@ -364,6 +364,7 @@ export async function submitAnswer(
 async function synthesizePersona(
   supabase: Db,
   userId: string,
+  runId: string,
   answers: StoredAnswer[],
 ): Promise<PersonaResult> {
   try {
@@ -397,6 +398,7 @@ async function synthesizePersona(
 
     const { error } = await supabase.from("assessments").insert({
       user_id: userId,
+      run_id: runId,
       summary: result.output.summary,
       goals: result.output.goals,
       traits: result.output.traits,
@@ -426,8 +428,9 @@ export async function generatePersona(
   _formData: FormData,
 ): Promise<PersonaResult> {
   const { supabase, userId } = await currentUser();
-  const answers = await readAnswers(supabase, userId);
-  return synthesizePersona(supabase, userId, answers);
+  const run = await currentRun(supabase, userId);
+  const answers = await readRunAnswers(supabase, userId, run.id);
+  return synthesizePersona(supabase, userId, run.id, answers);
 }
 
 // -- Redo one section ---------------------------------------------------------
@@ -451,7 +454,8 @@ export async function redoPhase(
     if (!parsed.success) return { ok: false, error: "That is not a section of the interview." };
 
     const { supabase, userId } = await currentUser();
-    const answers = await readAnswers(supabase, userId);
+    const run = await currentRun(supabase, userId);
+    const answers = await readRunAnswers(supabase, userId, run.id);
     const ids = phaseResetIds(answers, parsed.data as Exclude<Phase, "done">);
 
     if (ids.length === 0) {
@@ -462,12 +466,33 @@ export async function redoPhase(
       .from("assessment_answers")
       .delete()
       .eq("user_id", userId)
+      .eq("run_id", run.id)
       .in("question_id", ids);
 
     if (error) {
       return { ok: false, error: `Could not clear that section: ${error.message}` };
     }
 
+    revalidatePath("/assessment");
+    return { ok: true };
+  } catch (cause) {
+    return { ok: false, error: describe(cause) };
+  }
+}
+
+// -- Start a new assessment ----------------------------------------------
+
+/**
+ * Starts a fresh run (spec 18 item 4). The previous run's answers and
+ * assessment are untouched -- nothing here deletes anything, and the results
+ * page's history section (see ./data.ts) is how the old one is read back.
+ * `onboarding_state` is not touched: a person reflecting again has already
+ * onboarded.
+ */
+export async function startNewAssessment(): Promise<PersonaResult> {
+  try {
+    const { supabase, userId } = await currentUser();
+    await startRun(supabase, userId);
     revalidatePath("/assessment");
     return { ok: true };
   } catch (cause) {

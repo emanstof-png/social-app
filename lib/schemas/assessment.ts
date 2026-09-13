@@ -8,6 +8,8 @@ export const assessmentAnswerRow = rowBase.extend({
   question_text: z.string().min(1),
   answer: z.string(),
   asked_at: timestamptz,
+  /** The run this answer was given in (spec 18). Scopes the interview. */
+  run_id: uuid,
 });
 
 export const assessmentAnswerInsert = assessmentAnswerRow
@@ -35,6 +37,8 @@ export const assessmentRow = rowBase.extend({
   assessment_types_used: z.array(z.string()),
   generated_at: timestamptz,
   model_run_id: uuid.nullable(),
+  /** The run this assessment was generated from (spec 18). */
+  run_id: uuid,
 });
 
 export const assessmentInsert = assessmentRow

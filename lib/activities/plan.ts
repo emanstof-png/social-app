@@ -33,19 +33,34 @@ export type PlanActivity = {
    * `kind` alone -- see mergeSuggestions.
    */
   kind_edited_by_user: boolean;
+  /**
+   * Which assessment seeded this row (spec 18 item 6), null for anything not
+   * seeded from one. Set only by seedFromAssessment in activities/data.ts --
+   * seedRowsFrom below stays assessment-content-only and does not set it.
+   */
+  assessment_id: string | null;
 };
 
-/** A row to be inserted: everything but the database-generated columns. */
-export type NewActivity = Omit<PlanActivity, "id">;
+/**
+ * A row to be inserted: everything but the database-generated columns.
+ * `assessment_id` stays optional here rather than following PlanActivity's
+ * required shape -- seedRowsFrom, mergeSuggestions and addActivity's own row
+ * never set it, and only seedFromAssessment adds it afterward.
+ */
+export type NewActivity = Omit<PlanActivity, "id" | "assessment_id"> & {
+  assessment_id?: string | null;
+};
 
 export type Suggestion = z.infer<typeof activitySuggestionOutput>["suggestions"][number];
 
 /** The persona, as much of it as this engine reads. */
 export type PlanAssessment = {
+  id: string;
   summary: string | null;
   goals: string[];
   traits: string[];
   desired_activities: { name: string; rationale: string }[];
+  generated_at: string;
 };
 
 /**
@@ -245,6 +260,18 @@ export function mergeSuggestions(
   }
 
   return plan;
+}
+
+/**
+ * Whether a row's provenance is the currently active assessment (spec 18 item
+ * 6), for the "From your <date> assessment" line -- a row seeded by an older
+ * run, or never seeded from one at all, shows nothing.
+ */
+export function isFromCurrentAssessment(
+  activity: Pick<PlanActivity, "assessment_id">,
+  currentAssessmentId: string | null,
+): boolean {
+  return currentAssessmentId !== null && activity.assessment_id === currentAssessmentId;
 }
 
 /** Best fit first; an unscored activity sorts last, then by name. */

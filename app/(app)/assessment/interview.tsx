@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import type { InputKind } from "@/lib/assessments/flow";
 import { loadQuestion, submitAnswer } from "./actions";
+import { StartNewAssessment } from "./start-new-assessment";
 import type { AnsweredSummary, InterviewState, Progress } from "./view";
 
 /**
@@ -38,8 +39,12 @@ type Shown = {
 
 export function Interview({
   initial,
+  hasPreviousRun,
 }: {
   initial: { progress: Progress; answered: AnsweredSummary[] };
+  /** Spec 18 item 4: shown on every question, including the first, only once
+   * a previous run exists. */
+  hasPreviousRun: boolean;
 }) {
   const router = useRouter();
   const [state, setState] = useState<InterviewState | null>(null);
@@ -154,6 +159,12 @@ export function Interview({
   return (
     <div className="flex max-w-2xl flex-col gap-5">
       <ProgressBar progress={progress} />
+
+      {hasPreviousRun && (
+        <div className="self-start">
+          <StartNewAssessment />
+        </div>
+      )}
 
       {state && !state.ok && (
         <div

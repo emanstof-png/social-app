@@ -1,7 +1,9 @@
 import type { InventoryResult } from "@/lib/assessments/catalogue";
 import { PHASE_LABELS } from "@/lib/assessments/flow";
 import type { DesiredActivity } from "@/lib/schemas/assessment";
+import type { PreviousAssessment } from "./data";
 import { ResultsActions } from "./results-actions";
+import { StartNewAssessment } from "./start-new-assessment";
 
 /**
  * The assessment results (spec 03 item 5): the scored inventories and the
@@ -32,21 +34,26 @@ export function Results({
   inventories,
   version,
   totalVersions,
+  previous,
 }: {
   persona: Persona;
   inventories: InventoryResult[];
   version: number;
   totalVersions: number;
+  previous: PreviousAssessment[];
 }) {
   return (
     <div className="flex max-w-3xl flex-col gap-6">
-      <header>
-        <h1 className="text-2xl font-semibold">Your assessment</h1>
-        <p className="mt-1 text-xs opacity-60">
-          Generated {new Date(persona.generated_at).toLocaleString()}
-          {totalVersions > 1 && ` · version ${version} of ${totalVersions}, earlier ones kept`}
-          {persona.model_run_id && ` · run ${persona.model_run_id.slice(0, 8)}`}
-        </p>
+      <header className="flex flex-wrap items-baseline justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold">Your assessment</h1>
+          <p className="mt-1 text-xs opacity-60">
+            Generated {new Date(persona.generated_at).toLocaleString()}
+            {totalVersions > 1 && ` · version ${version} of ${totalVersions}, earlier ones kept`}
+            {persona.model_run_id && ` · run ${persona.model_run_id.slice(0, 8)}`}
+          </p>
+        </div>
+        <StartNewAssessment />
       </header>
 
       {persona.summary && (
@@ -143,7 +150,90 @@ export function Results({
         </section>
       )}
 
+      {previous.length > 0 && (
+        <details className="rounded-lg border border-black/10 p-5 dark:border-white/15">
+          <summary className="cursor-pointer font-medium">
+            Previous assessments ({previous.length})
+          </summary>
+          <div className="mt-4 flex flex-col gap-4">
+            {previous.map((one) => (
+              <PreviousAssessmentCard key={one.runId} assessment={one} />
+            ))}
+          </div>
+        </details>
+      )}
+
       <ResultsActions sections={SECTIONS.map((section) => ({ ...section }))} />
     </div>
+  );
+}
+
+/**
+ * One earlier run's finished assessment (spec 18 item 5), collapsed to a date
+ * and the first sentence of its summary, expanding to the full assessment and
+ * that run's own answers -- read-only, reusing the interview's "Your answers
+ * so far" rendering.
+ */
+function PreviousAssessmentCard({ assessment }: { assessment: PreviousAssessment }) {
+  return (
+    <details className="rounded border border-black/10 p-4 dark:border-white/15">
+      <summary className="cursor-pointer text-sm">
+        <span className="font-medium">{new Date(assessment.generatedAt).toLocaleDateString()}</span>
+        {assessment.firstSentence && <span className="opacity-75"> — {assessment.firstSentence}</span>}
+      </summary>
+
+      <div className="mt-3 flex flex-col gap-4 text-sm">
+        {assessment.summary && (
+          <div className="flex flex-col gap-2 leading-relaxed">
+            {assessment.summary.split(/\n{2,}/).map((paragraph, index) => (
+              <p key={index}>{paragraph}</p>
+            ))}
+          </div>
+        )}
+
+        {assessment.goals.length > 0 && (
+          <div>
+            <h3 className="text-xs font-medium uppercase tracking-wide opacity-60">Goals</h3>
+            <ul className="mt-1 list-disc pl-5">
+              {assessment.goals.map((goal) => (
+                <li key={goal}>{goal}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {assessment.desiredActivities.length > 0 && (
+          <div>
+            <h3 className="text-xs font-medium uppercase tracking-wide opacity-60">
+              Activities wanted
+            </h3>
+            <ul className="mt-1 flex flex-col gap-1.5">
+              {assessment.desiredActivities.map((activity) => (
+                <li key={activity.name}>
+                  <span className="font-medium">{activity.name}</span>{" "}
+                  <span className="opacity-75">— {activity.rationale}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {assessment.answers.length > 0 && (
+          <details className="rounded border border-black/10 p-3 dark:border-white/15">
+            <summary className="cursor-pointer text-xs font-medium">
+              Its answers ({assessment.answers.length})
+            </summary>
+            <ol className="mt-2 flex flex-col gap-2">
+              {assessment.answers.map((row) => (
+                <li key={row.questionId}>
+                  <p className="text-xs opacity-70">{row.questionText}</p>
+                  <p className="mt-0.5">{row.answer}</p>
+                </li>
+              ))}
+            </ol>
+          </details>
+        )}
+      </div>
+    </details>
   );
 }

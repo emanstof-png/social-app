@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { timestampedRowBase } from "./common";
+import { timestampedRowBase, uuid } from "./common";
 import { activityKind, activitySource, activityStatus } from "./enums";
 
 /**
@@ -25,6 +25,13 @@ export const activityRow = timestampedRowBase.extend({
    * implies whether someone once changed this field.
    */
   kind_edited_by_user: z.boolean(),
+  /**
+   * Which assessment seeded this row, so a person can tell a new suggestion
+   * from an old one after starting a new assessment (spec 18 item 6). Null
+   * for every row seeded before this spec, and for anything added by
+   * suggestActivities or by the user themselves.
+   */
+  assessment_id: uuid.nullable(),
 });
 
 export const activityInsert = activityRow
@@ -35,6 +42,7 @@ export const activityInsert = activityRow
     kind: true,
     fit_score: true,
     kind_edited_by_user: true,
+    assessment_id: true,
   });
 
 export const activityUpdate = activityInsert

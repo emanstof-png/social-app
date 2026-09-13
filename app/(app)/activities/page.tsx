@@ -77,6 +77,9 @@ export default async function ActivitiesPage() {
       activities={data.activities}
       cap={data.cap}
       canSuggest={data.assessment !== null && data.assessment.goals.length > 0}
+      currentAssessment={
+        data.assessment && { id: data.assessment.id, generatedAt: data.assessment.generated_at }
+      }
     />
   );
 }

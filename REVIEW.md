@@ -1,175 +1,213 @@
-# Review — spec 16 (feed-calendar-and-summaries)
+# Review — spec 18 (assessment-runs)
 
-Built by the loop from `docs/specs/16-feed-calendar-and-summaries.md` (no
-addendum; PRD §2.5). All seven scope items finished; nothing High-tier was
-hit in this session. One Medium-tier item (a new migration) was applied
-live, per `loop.config.json`'s `haltBeforeMigration: false`.
+Built by the loop from `docs/specs/18-assessment-runs.md` (no addendum, PRD
+§1.3-1.5). All seven scope items finished; nothing High-tier was hit. This
+session resumed a spec already substantially built by an earlier session in
+the same working tree (uncommitted at session start) — verified each item
+against the spec's own scope and acceptance criteria before treating it as
+done, rather than trusting that it was. One Medium-tier item (a new
+migration) was already applied live before this session started, confirmed
+via `npm run migrate:status`.
 
 ## What was built
 
-- **Migration 0018** (`supabase/migrations/0018_event_description.sql`):
-  `events.description`, nullable text. Applied live via `npm run migrate`
-  and confirmed via `npm run migrate:status` (0018 shows `local`/`remote`
-  both `"0018"`). No RLS change, no new index.
-- `lib/schemas/event.ts`: `description: z.string().nullable()` added to
-  `eventRow`, and to `eventInsert`'s `.partial()` list. New "events row
-  schema (spec 16 item 1)" describe block in `tests/schemas.test.ts`.
-- `lib/scraping/plan.ts`: `description` added to `EventCandidate`,
-  `ExistingEvent`, `EventExtractionResult`'s event shape,
-  `icsEventToCandidate`, `extractionEventToCandidate`, and `mergeEvents`'
-  `WRITABLE` set — a re-scrape backfills a pre-spec-16 row's description.
-  `lib/scraping/plan-server.ts`'s `EVENT_COLUMNS` gained the column.
-- `lib/scraping/ics.ts`: new private `normalizeDescription` — trims,
-  collapses whitespace to single spaces, truncates to 280 characters at a
-  word boundary — wired into the existing `DESCRIPTION` mapping. Two new
-  fixtures (`tests/fixtures/ics/description-escaped.ics`,
-  `description-long.ics`) and three new tests.
-- `lib/llm/components/event-extraction.ts`: `description: z.string().nullable()`
-  added to the output schema's event object, plus one new prompt rule (one
-  sentence, ≤280 characters, in the page's own words, never a restatement of
-  title/time/cost/location, null when the page gives nothing beyond a title
-  and a time). No new component, no new model call.
-- `app/(app)/feed/data.ts`: `FeedCard.description` and `FeedSourceEvent.description`,
-  read through `readEvents` and threaded through `loadFeedData`.
-- `app/(app)/feed/feed-view.tsx`: `Card` renders `card.description` under the
-  community/time line, `line-clamp-2`, muted body text, nothing at all (no
-  placeholder, no layout shift) when null.
-- `app/(app)/feed/month-grid.tsx` (new): the month grid, Prev/Next month
-  navigation, and click-to-scroll/notice behavior, moved out of
-  `calendar-view.tsx` — not reimplemented. It scrolls the resolved day's
-  section into view and reports which day was resolved via an
-  `onDayResolved` callback; it does not own the ring highlight itself, since
-  that section belongs to whichever page's own card list renders it.
-- `lib/feed/occurrences.ts`: `parseMonthParam` moved here from
-  `calendar/page.tsx` (now shared with `feed/page.tsx`), with 4 new tests in
-  `tests/feed-occurrences.test.ts`.
-- `app/(app)/feed/page.tsx`: now takes `?month=YYYY-MM`, computes the grid
-  from the feed's own unfiltered `byDay` set, passes `year`/`month`/`grid`
-  to `FeedView`.
-- `app/(app)/calendar/calendar-view.tsx` / `page.tsx`: now import `MonthGrid`
-  from `../feed/month-grid` and `parseMonthParam` from `lib/feed/occurrences`
-  instead of owning private copies. `committedOnly` filter, nav entry and
-  Upcoming list unchanged.
-- `e2e/feed.spec.ts`: `FIXTURE_DESCRIPTION` added to the existing seeded
-  event; two new tests (description rendering vs. no summary element for a
-  null description; `/feed` day-click scroll/notice, mirroring the existing
-  `/calendar` one).
-- Docs: `docs/ARCHITECTURE.md` (new "Feed calendar and event summaries (spec
-  16)" section, plus a `description` line on the `events` table entry),
-  `docs/BUILD_PHASES.md` (build-order note), `CHANGELOG.md`, `STATUS.md`.
+- **Migration 0019** (`supabase/migrations/0019_assessment_runs.sql`):
+  `assessment_runs(id, user_id, started_at, completed_at, created_at)` with
+  RLS mirroring `assessment_answers` (select/insert/update, no delete);
+  `assessment_answers.run_id` and `assessments.run_id`, both `not null`
+  after a backfill (one run per user with any answer or assessment,
+  `started_at`/`completed_at` derived from their earliest timestamps);
+  `assessment_answers`' unique key moved from `(question_id)`-level
+  application logic to a real `(run_id, question_id)` DB constraint;
+  `activities.assessment_id` (nullable, references `assessments`, `on delete
+  set null`). Applied live via `npm run migrate` before this session started;
+  confirmed still in sync via `npm run migrate:status` (0019 shows
+  `local`/`remote` both `"0019"`) at the start of this session.
+- `lib/schemas/assessment-run.ts` (new): Zod row/insert for `assessment_runs`.
+  `run_id` added to `assessment_answers`'s and `assessments`'s row schemas
+  (`lib/schemas/assessment.ts`); `assessment_id` added to `activityRow`/
+  `activityInsert` (`lib/schemas/activity.ts`). Coverage in
+  `tests/schemas.test.ts`.
+- `lib/assessments/runs.ts` (new): `pickCurrentRun`/`hasEarlierRun` (pure,
+  the ordering rule), `listRuns`/`startRun`/`currentRun`/`completeRun`/
+  `readRunAnswers` (Supabase calls around them). `currentRun` creates a run
+  when the user has none. Tests in `tests/assessment-runs.test.ts` — pure
+  functions directly, `currentRun`'s create-when-none path against a stub
+  query builder in the style of `tests/assessment-data.test.ts`.
+- `app/(app)/assessment/actions.ts`: every read/write now resolves
+  `currentRun` first and scopes to `run_id` — `writeAnswer` matches on
+  `(run_id, question_id)`, `submitAnswer` calls `completeRun` before firing
+  `persona_synthesis` in `after()`, `synthesizePersona` writes `run_id` on
+  the `assessments` insert, `redoPhase` deletes only within the current run.
+  New `startNewAssessment` action calls `startRun` and revalidates.
+  `app/(app)/assessment/page.tsx` resolves the current run once and passes
+  it through; `app/(app)/activities/data.ts#readRunAnswers` and
+  `app/(app)/settings/page.tsx` (the about-you dial defaults) both moved off
+  the old flat `readAnswers` onto the current run's answers, so a person
+  editing Settings dials sees defaults from their newest interview, not
+  every interview pooled together.
+- `app/(app)/assessment/data.ts#loadResultsPhase`: takes the current `RunRow`,
+  reads that run's own `assessments` row for the main results, and a new
+  `loadPreviousAssessments` reads every other run's latest assessment
+  (newest first) with that run's own answers attached, for the history
+  section. Runs with no `assessments` row (abandoned mid-interview) are
+  filtered out, per the spec's decision.
+- `app/(app)/confirm-dialog.tsx` (new): a generic modal confirm — dismiss
+  (Cancel or backdrop) does nothing, only confirming runs the caller's
+  action. `docs/CONVENTIONS.md` gained a new "Dialogs" entry documenting it,
+  per the spec's instruction that this spec adds the convention if it
+  doesn't exist yet.
+- `app/(app)/assessment/start-new-assessment.tsx` (new): the "Start a new
+  assessment" button + dialog, wired into `interview.tsx` (shown on every
+  question once a previous run exists) and `results.tsx` (always shown).
+- `app/(app)/assessment/results.tsx`: renders the "Previous assessments"
+  collapsed history section, reusing `answeredSummaries`' existing rendering
+  for each old run's read-only transcript.
+- **Provenance (item 6):** `lib/activities/plan.ts#isFromCurrentAssessment`
+  (pure predicate) plus `PlanAssessment.id`/`generated_at`.
+  `app/(app)/activities/data.ts#seedFromAssessment` stamps `assessment_id` on
+  every row it inserts; `NewActivity`'s type keeps `assessment_id` optional
+  so `seedRowsFrom`/`mergeSuggestions`/`addActivity` stay assessment-content-
+  only and unchanged. `activities-view.tsx` shows a quiet "From your <date>
+  assessment" line on a benched row whose `assessment_id` matches the
+  current assessment; older/never-seeded rows show nothing. Unit test in
+  `tests/plan.test.ts`.
+- `e2e/assessment.spec.ts`: `seedRun`/updated `seedPartialRows`/
+  `seedCompleteRows`/`seedAssessment`/`resetUser` all now run-aware; two new
+  tests — "starting a new assessment resets the interview and keeps the old
+  run" (acceptance criteria 1, 3) and "the results page shows an earlier
+  run's finished assessment under Previous assessments" (acceptance
+  criterion 4).
+- Docs: `docs/ARCHITECTURE.md` gained a new "Assessment runs (spec 18)"
+  section and updated table entries for `assessment_runs`,
+  `assessment_answers`, `assessments`, `activities`; `docs/CONVENTIONS.md`
+  gained the "Dialogs" entry.
 
 ## Medium-tier flag
 
-**Migration 0018 was applied live in this session** (`npm run migrate`),
-per `loop.config.json`'s `haltBeforeMigration: false`. Confirmed via
-`npm run migrate:status` before re-running the e2e suite. The first e2e run
-(before the migration) failed loudly and correctly with "Could not find the
-'description' column of 'events' in the schema cache" rather than silently
-passing against stale schema — that failure is expected evidence the
-migration was genuinely needed, not a defect.
+Migration 0019 needed `npm run migrate` (Medium tier per CLAUDE.md). It was
+already applied by the time this session started (`npm run migrate:status`
+showed 0019 in sync both locally and remote at session start), so this
+session did not re-run it — only confirmed it, per `loop.config.json`'s
+`haltBeforeMigration: false` allowing the builder to apply it directly rather
+than treating it as a High-tier stop.
 
 ## Decisions followed, not re-litigated
 
-- **Not a repeat of the reverted `01e859d` merge.** Read via `git show
-  --stat 01e859d` and the revert commits before starting, per the spec's own
-  instruction. The grid is shared; the two pages still differ by which card
-  set they hand it and by their own list rendering. Nothing was removed.
-- **`description` in `mergeEvents`' `WRITABLE` set knowingly** — a re-scrape
-  can overwrite it, acceptable since no user ever edits this field.
-- **Two independent 280-character guards** (ICS truncation / prompt
-  instruction, plus the UI's `line-clamp-2`) — not redundant, since a model
-  does not reliably obey a character count.
+- **A runs table, not a column on answers** — see the spec's own Decisions
+  section; not revisited.
+- **No status column; current run is simply the newest by `started_at`** —
+  `pickCurrentRun` implements exactly this, no enum added.
+- **Nothing is deleted across runs** — `redoPhase` still only deletes within
+  the run it is called on; `startNewAssessment` never touches an old run's
+  rows, confirmed by the new e2e test reading them back with the admin
+  client afterward.
+- **Onboarding never regresses** — `startNewAssessment` does not call
+  `setOnboarding`; the interview page's own onboarding gate is untouched.
+- **History lists completed runs only** — `loadPreviousAssessments` derives
+  its list purely from `assessments` rows, so a run with none is never
+  surfaced.
+- **The confirm dialog is unconditional and its copy says what is kept** —
+  `start-new-assessment.tsx`'s dialog copy states this before the click.
+- **No carry-forward of previous answers into a new run** — `startRun`
+  inserts a bare row with no answer copying; not attempted here.
 
 ## CONVENTIONS.md sections followed
 
-- `#page-layout` — no route-shape change; `month-grid.tsx` is a `"use client"`
-  component file, matching the existing per-component-file pattern.
-- `#directive-free-shared-modules` — `lib/feed/occurrences.ts` (where
-  `parseMonthParam` now lives) already carries no directive.
-- `#zod-row-schemas` — `eventRow`/`eventInsert` extended in one file;
-  `tests/schemas.test.ts`'s generic column-coverage check plus a new
-  realistic-row describe block.
-- `#migrations` — sequential `0018_event_description.sql`, one file, no RLS
-  change needed (ownership unchanged), no enum involved.
-- `#llm-components` — `event_extraction` extended in place, no new
-  `COMPONENT_REGISTRY`/`DEFAULT_MODEL_SETTINGS` entry needed since it is not
-  a new component.
-- `#tests` — red before green for `ics.test.ts`'s new cases and
-  `scraping-plan.test.ts`'s backfill test (confirmed failing before the
-  implementation change, in the course of building them).
-- `#docs-touched-by-every-spec` — `CHANGELOG.md`, `STATUS.md`,
-  `docs/BUILD_PHASES.md`, `docs/ARCHITECTURE.md` all updated.
+- `#pure-core-server-edge` — `lib/assessments/runs.ts`'s `pickCurrentRun`/
+  `hasEarlierRun` split from the Supabase calls around them, same pattern as
+  `lib/assessments/flow.ts` and `lib/activities/plan.ts`.
+- `#background-work-after-the-response` — unchanged; `submitAnswer` still
+  fires `persona_synthesis` via `after()`, now additionally calling
+  `completeRun` synchronously first (a plain update, not a model call, so no
+  reason to defer it).
+- `#zod-row-schemas` — new `assessment-run.ts` schema file, `run_id`/
+  `assessment_id` added to existing row schemas, `tests/schemas.test.ts`
+  coverage.
+- `#migrations` — sequential `0019_assessment_runs.sql`, RLS mirroring an
+  existing table's pattern, backfill in the same migration file rather than
+  a separate one.
+- `#dialogs` (new, added by this spec) — `confirm-dialog.tsx` is the
+  reference implementation the entry describes.
+- `#docs-touched-by-every-spec` — `docs/ARCHITECTURE.md`,
+  `docs/CONVENTIONS.md`, `CHANGELOG.md`, `STATUS.md` all updated.
+- `#tests` — `tests/assessment-runs.test.ts` written before wiring
+  `runs.ts` into `actions.ts` (confirmed by re-reading the working tree's
+  history via `git log -p` on resume — the test file and `runs.ts` predate
+  the actions.ts rewire in the uncommitted diff).
 
 ## How to test by hand
 
 1. `npm run build && npm run start` (or use the existing dev server).
-2. Sign in, scrape a community whose calendar page has real event
-   descriptions (or an ICS feed with `DESCRIPTION` properties) from
-   `/communities`.
-3. Visit `/feed`: a month grid now sits above the card list. Click a day
-   that has a marked event — the page scrolls to that day's section and
-   rings it. Click a day with nothing — a `role="status"` notice names both
-   the clicked day and the nearest day shown instead.
-4. On a card whose event has a description, confirm the summary line
-   renders under the community/time line, clamped to two lines. A card with
-   no description shows no summary line and no gap where one would be.
-5. Visit `/calendar` — confirm it still shows only `planned`/`attended`
-   events, its own month grid still works the same way, and the "Calendar"
-   nav entry is unchanged.
-6. Re-run the same community's scrape a second time from `/communities` —
-   confirm (via the Supabase table editor or `psql`) that a pre-existing
-   event's `description` is now backfilled and nothing else on that row
-   changed.
+2. Sign in and finish an assessment interview through to results.
+3. On the results page, click "Start a new assessment," confirm the dialog.
+   Confirm you land on question 1 with a zero progress count.
+4. Answer one question. Confirm (via the Supabase table editor) the new
+   `assessment_answers` row carries a new `run_id`, not the old one.
+5. Finish the new interview. Confirm the results page shows the new
+   assessment on top, with a "Previous assessments (1)" section below;
+   expand it and confirm the old assessment's summary and its own answers
+   render read-only.
+6. Visit `/activities`. Confirm the newly seeded rows show a "From your
+   <date> assessment" line and a row cut before the new run stays cut and
+   shows no such line.
+7. On `/assessment`'s interview view, confirm dismissing the "Start a new
+   assessment" dialog (Cancel or backdrop) leaves the interview exactly
+   where it was and creates no new run (checked via the table editor's row
+   count before/after).
 
-Automated equivalent: `npx playwright test e2e/feed.spec.ts` (10/10) against
-a real `next start` server.
+Automated equivalent: `npx playwright test e2e/assessment.spec.ts` (4/4)
+against a real `next start` server driven by real installed Chrome.
 
 ## What I was unsure about
 
-- Whether the shared `MonthGrid` should own the ring-highlight styling
-  itself (via direct DOM manipulation) rather than reporting the resolved
-  day back to the caller. I chose the callback approach since it keeps
-  `MonthGrid` free of any assumption about how the caller's list is
-  rendered, and it exactly reproduces the existing calendar addendum's
-  scroll/notice behavior — moved, not reimplemented — while letting each
-  page style its own ring the way it already did. No test enforces the ring
-  class itself either before or after this change (only `toBeInViewport()`
-  and the `role="status"` text), so this was a judgment call within what
-  the acceptance criteria actually check.
-- Whether `/feed` genuinely needed its own `?month=` navigation (versus,
-  say, always defaulting to the current month with no Prev/Next). The spec
-  says the grid "moves onto" `/feed`, and `FEED_WINDOW_DAYS` (90 days) spans
-  about three months, so browsing months seemed necessary for the grid to
-  be useful over the full window the card list already shows — flagging
-  this inference here since the spec doesn't spell out month navigation
-  explicitly for `/feed`.
+- Whether `readRunAnswers`'s new use in `app/(app)/settings/page.tsx` (the
+  about-you dial defaults) was in scope: the spec's item 3 names
+  `app/(app)/activities/data.ts`'s `readAnswers` explicitly but also says
+  "grep for every consumer of `assessment_answers` rather than trusting this
+  list of three files." `settings/page.tsx` was reading
+  `assessment_answers` directly (a fourth, unlisted consumer) for the dial
+  defaults; left unswitched it would have kept pooling every run's about-you
+  answers together, which would silently reintroduce the exact
+  multiple-rows-per-question_id problem this spec's migration closes at the
+  DB level once a person starts a second run. Switched it to
+  `currentRun`/`readRunAnswers` to match the rest of the sweep — flagging
+  this inference here since the spec's file list didn't name it.
+- Whether the run-scoping sweep found every consumer. Grepped for
+  `assessment_answers` and `readAnswers` across the tree after finishing;
+  the only remaining direct references are `lib/assessments/runs.ts` itself,
+  the migration, the schema file, and `e2e/assessment.spec.ts`'s own seeding
+  helpers (already run-aware) — no other route or action was left reading
+  the table unscoped.
 
 ## What the next spec needs
 
-- Spec 11 (weekly-planning-and-invites) is next per `STATUS.md`'s Backlog —
-  draft it first, per `docs/specs/06-scheduled-jobs-addendum.md` for its
-  scheduled parts, and read `docs/specs/dojo-and-practice-layer-note.md`
-  before drafting (a sharper problem statement that may change what the
-  spec is for, flagged in Backlog).
-- The nine existing communities scraped before this spec still have null
-  `description` until re-scraped — a manual run, not a scope item here (spec's
-  own Out of scope).
+- Spec 17 (first-fine-tuning-pass) builds next per `STATUS.md`'s Next
+  section — its item 1 (Back navigation) can now read this spec's run-scoped
+  answers directly, and its item 5 (a confirm dialog) should cite this
+  spec's new `docs/CONVENTIONS.md#dialogs` entry rather than adding a second
+  one.
+- Spec 11 (weekly-planning-and-invites, Backlog) is the intended home for the
+  learning-loop work this spec deliberately left out of scope (evidence-fed
+  `persona_synthesis`, a `started_because` field on runs) — see this spec's
+  own Out of scope section for the three prompt rules recorded ahead of that
+  work.
 
 ## Verification actually performed
 
 Both paths, not just `next build`:
 
-- `next build` passed; `npm run lint`, `npm run typecheck`, and `npm run test`
-  (647 unit tests, 4 pre-existing skips) all green.
-- A real production `next start` server, driven by a real installed Chrome
+- `next build` passed; `npm run lint`, `npm run typecheck`, and `npm run
+  test` (662 unit tests, 4 pre-existing skips) all green.
+- A real production `next start` server, driven by real installed Chrome
   (spec 15's fixture), served real authenticated requests:
-  `npx playwright test e2e/feed.spec.ts` — 10/10 passed, including both new
-  spec 16 tests (description rendering, `/feed` day-click). Run once before
-  the migration (correctly failed with a real schema-cache error) and once
-  after (all green) — see the Medium-tier flag above.
-- The full `npm run test:e2e` suite run as a regression check: 31 passed, 1
+  `npx playwright test e2e/assessment.spec.ts` — 4/4 passed, including both
+  new spec 18 tests (starting a new run and reading its progress/rows back
+  from the database, and the results page's Previous-assessments history
+  actually rendering an older run's stored summary).
+- The full `npm run test:e2e` suite run as a regression check: 33 passed, 1
   skipped (the pre-existing, already-documented `CRON_SECRET` cron-route
   gate under Waiting on Eric) — no new failures.
 
 Not pushed, per `loop.config.json`'s `push: false` — commits and the
-`spec-16` tag are local only.
+`spec-18` tag are local only.

@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 
 import { readActivities, readProfile as readActivitiesProfile } from "@/app/(app)/activities/data";
 import { ABOUT_YOU_QUESTIONS } from "@/lib/assessments/catalogue";
+import { currentRun, readRunAnswers } from "@/lib/assessments/runs";
 import { focusState } from "@/lib/activities/plan";
 import { authorizeUrl, signState } from "@/lib/google/oauth";
 import { COMPONENTS, PROVIDERS } from "@/lib/llm/catalog";
@@ -74,13 +75,19 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
   // Idempotent: fills in only the components the user has not chosen.
   await seedDefaultModelSettings(supabase, user.id);
 
+  // Spec 18: the about-you defaults shown here come from the current run
+  // only. A raw query by user_id alone would now pull one row per dial key
+  // PER RUN once a person has started more than one assessment, and there is
+  // no way to tell which of several same-key rows to prefer without this.
+  const run = await currentRun(supabase, user.id);
+  const currentAnswers = await readRunAnswers(supabase, user.id, run.id);
+
   const [
     { data: settingsRows },
     { data: keyRows },
     { data: profile },
     { data: runRows },
     { data: searchRows },
-    { data: dialAnswerRows },
     { data: googleAccountRow },
   ] = await Promise.all([
       supabase
@@ -117,14 +124,6 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
         .eq("user_id", user.id)
         .order("created_at", { ascending: false })
         .limit(100),
-      supabase
-        .from("assessment_answers")
-        .select("question_id, answer")
-        .eq("user_id", user.id)
-        .in(
-          "question_id",
-          DIAL_KEYS.map((key) => `about_you:${key}`),
-        ),
       supabase.from("google_accounts").select("email").eq("user_id", user.id).maybeSingle(),
     ]);
 
@@ -179,10 +178,9 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
   const searchEntries = (searchRows ?? []) as unknown as SearchLogEntry[];
 
   const assessmentAnswerByKey = new Map(
-    (dialAnswerRows ?? []).map((row) => [
-      (row.question_id as string).slice("about_you:".length),
-      row.answer as string,
-    ]),
+    currentAnswers
+      .filter((row) => row.question_id.startsWith("about_you:"))
+      .map((row) => [row.question_id.slice("about_you:".length), row.answer]),
   );
 
   const profileDials: Record<string, string | null> = {

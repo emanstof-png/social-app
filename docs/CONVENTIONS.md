@@ -223,6 +223,22 @@ contacts, and `0009` grants none on `discovery_runs` or `search_log`. An
 archived row is shown apart and can be restored, as `partitionByArchived` in
 `app/(app)/communities/view.ts` does.
 
+## Dialogs
+
+A destructive or hard-to-undo action that a person could click by accident gets
+a modal confirm before it runs: `app/(app)/confirm-dialog.tsx`'s `ConfirmDialog`,
+a directive-free-adjacent (it is `"use client"`, but owns no app state -- the
+caller passes `open` and gets `onCancel`/`onConfirm` back) component any route
+can import directly. Dismissing -- Cancel or the backdrop -- does nothing; only
+confirming runs the caller's action, named on the confirm button rather than a
+bare "OK". The description says what is kept or lost before the click, not
+after: `app/(app)/assessment/start-new-assessment.tsx`'s "Start a new
+assessment?" dialog is the model to copy (spec 18 item 4).
+
+An action that only sets something aside (bench, cut) or that nothing else
+depends on skips the dialog and runs straight from the button, the same as
+`setStatus` on `/activities` already does.
+
 ## Settings is the operator surface
 
 Each subsystem adds a read-only section to `/settings` showing its configuration

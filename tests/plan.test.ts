@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   canActivate,
   focusState,
+  isFromCurrentAssessment,
   mergeSuggestions,
   normalizeName,
   seasonPlan,
@@ -28,11 +29,13 @@ function activity(over: Partial<PlanActivity> & { name: string }): PlanActivity 
     kind: "recurring_community",
     fit_score: null,
     kind_edited_by_user: false,
+    assessment_id: null,
     ...over,
   };
 }
 
 const assessment = {
+  id: "assessment-1",
   summary: "Steady, outdoorsy, slow to warm.",
   goals: ["Be a regular somewhere within three months"],
   traits: ["steady", "slow to warm"],
@@ -40,6 +43,7 @@ const assessment = {
     { name: "Rucking", rationale: "It suits your taste for discipline." },
     { name: "Sailing", rationale: "You already loved it once." },
   ],
+  generated_at: "2026-01-01T00:00:00.000000+00:00",
 };
 
 const answers: StoredAnswer[] = [
@@ -449,5 +453,27 @@ describe("seasonPlan", () => {
       3,
     );
     expect(plan.focus.map((one) => one.name)).toEqual(["High", "Low", "Unscored"]);
+  });
+});
+
+describe("isFromCurrentAssessment", () => {
+  it("is true when the row's assessment_id matches the current one", () => {
+    const row = activity({ name: "Rucking", assessment_id: "assessment-2" });
+    expect(isFromCurrentAssessment(row, "assessment-2")).toBe(true);
+  });
+
+  it("is false for a row seeded by an older assessment", () => {
+    const row = activity({ name: "Rucking", assessment_id: "assessment-1" });
+    expect(isFromCurrentAssessment(row, "assessment-2")).toBe(false);
+  });
+
+  it("is false for a row never seeded from an assessment", () => {
+    const row = activity({ name: "Sea kayaking", assessment_id: null });
+    expect(isFromCurrentAssessment(row, "assessment-2")).toBe(false);
+  });
+
+  it("is false when there is no current assessment at all", () => {
+    const row = activity({ name: "Rucking", assessment_id: "assessment-2" });
+    expect(isFromCurrentAssessment(row, null)).toBe(false);
   });
 });

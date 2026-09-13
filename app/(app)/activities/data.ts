@@ -8,6 +8,7 @@ import {
   type PlanAssessment,
 } from "@/lib/activities/plan";
 import type { StoredAnswer } from "@/lib/assessments/flow";
+import { currentRun, readRunAnswers as readRunAnswersFor } from "@/lib/assessments/runs";
 import { activityRow } from "@/lib/schemas/activity";
 import { assessmentRow } from "@/lib/schemas/assessment";
 import { FOCUS_CAP_DEFAULT, focusCap } from "@/lib/schemas/profile";
@@ -33,7 +34,7 @@ export type ActivitiesData = {
 };
 
 const ACTIVITY_COLUMNS =
-  "id, name, rationale, source, status, kind, fit_score, kind_edited_by_user";
+  "id, name, rationale, source, status, kind, fit_score, kind_edited_by_user, assessment_id";
 
 export async function readActivities(
   supabase: Db,
@@ -59,6 +60,7 @@ export async function readActivities(
         kind: true,
         fit_score: true,
         kind_edited_by_user: true,
+        assessment_id: true,
       })
       .parse(row),
   );
@@ -103,7 +105,7 @@ export async function readAssessment(
 ): Promise<PlanAssessment | null> {
   const { data, error } = await supabase
     .from("assessments")
-    .select("summary, goals, traits, desired_activities")
+    .select("id, summary, goals, traits, desired_activities, generated_at")
     .eq("user_id", userId)
     .order("generated_at", { ascending: false })
     .limit(1);
@@ -114,7 +116,14 @@ export async function readAssessment(
   if (!latest) return null;
 
   const parsed = assessmentRow
-    .pick({ summary: true, goals: true, traits: true, desired_activities: true })
+    .pick({
+      id: true,
+      summary: true,
+      goals: true,
+      traits: true,
+      desired_activities: true,
+      generated_at: true,
+    })
     .safeParse(latest);
 
   if (!parsed.success) {
@@ -128,14 +137,14 @@ export async function readAssessment(
   return parsed.data;
 }
 
-export async function readAnswers(supabase: Db, userId: string): Promise<StoredAnswer[]> {
-  const { data, error } = await supabase
-    .from("assessment_answers")
-    .select("question_id, question_text, answer")
-    .eq("user_id", userId);
-
-  if (error) throw new Error(`Could not read your answers: ${error.message}`);
-  return (data ?? []) as StoredAnswer[];
+/**
+ * The current run's answers, so constraints come from the newest interview
+ * (spec 18 item 3) rather than from every run's answers pooled together.
+ * Replaces the old readAnswers, which read every answer the user ever gave.
+ */
+export async function readRunAnswers(supabase: Db, userId: string): Promise<StoredAnswer[]> {
+  const run = await currentRun(supabase, userId);
+  return readRunAnswersFor(supabase, userId, run.id);
 }
 
 /**
@@ -155,9 +164,12 @@ export async function seedFromAssessment(
   existing: PlanActivity[],
 ): Promise<PlanActivity[]> {
   const present = new Set(existing.map((one) => normalizeName(one.name)));
-  const missing = seedRowsFrom(assessment).filter(
-    (row) => !present.has(normalizeName(row.name)),
-  );
+  const missing = seedRowsFrom(assessment)
+    .filter((row) => !present.has(normalizeName(row.name)))
+    // Provenance (spec 18 item 6): which assessment introduced this row, so a
+    // person can tell a new suggestion from an old one after a new run.
+    // seedRowsFrom itself stays assessment-content-only and unchanged.
+    .map((row) => ({ ...row, assessment_id: assessment.id }));
 
   if (missing.length === 0) return existing;
 
@@ -192,6 +204,7 @@ export async function seedFromAssessment(
         kind: true,
         fit_score: true,
         kind_edited_by_user: true,
+        assessment_id: true,
       })
       .parse(row),
   );
@@ -208,7 +221,7 @@ export async function loadActivitiesData(
   const [{ cap, onboardingState }, assessment, answers] = await Promise.all([
     readProfile(supabase, userId),
     readAssessment(supabase, userId),
-    readAnswers(supabase, userId),
+    readRunAnswers(supabase, userId),
   ]);
 
   let activities = await readActivities(supabase, userId);

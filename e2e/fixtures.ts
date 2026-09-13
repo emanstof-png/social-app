@@ -16,11 +16,14 @@ import { chromium, expect, test as base } from "@playwright/test";
  * real-subscribe test cannot pass under it -- see docs/ARCHITECTURE.md's
  * "Evaluation and push" section for the full diagnosis.
  *
- * Overriding the built-in `context`/`page` fixtures means Playwright's own
- * automatic `trace: "on-first-retry"` wiring (playwright.config.ts) no
- * longer applies -- it lives inside the fixture being replaced -- so it is
- * reproduced by hand below: start unconditionally, keep only on a retried
- * attempt.
+ * Overriding the built-in `context`/`page` fixtures does not lose
+ * Playwright's automatic `trace: "on-first-retry"` wiring
+ * (playwright.config.ts): that hook starts/stops tracing itself on any
+ * newly-created `BrowserContext`, including one from
+ * `chromium.launchPersistentContext`, so this fixture must not also call
+ * `context.tracing.start()`/`stop()` by hand -- the two collide on a
+ * retried attempt (`tracing.start: Tracing has been already started`,
+ * see GitHub issue #12 / spec 19).
  *
  * Every spec file imports `test`/`expect` from here instead of
  * `@playwright/test` directly (the one exception is
@@ -35,19 +38,9 @@ export const test = base.extend({
       ...testInfo.project.use,
     });
 
-    await context.tracing.start({ screenshots: true, snapshots: true });
-
     try {
       await use(context);
     } finally {
-      if (testInfo.retry > 0) {
-        const tracePath = testInfo.outputPath("trace.zip");
-        await context.tracing.stop({ path: tracePath });
-        await testInfo.attach("trace", { path: tracePath, contentType: "application/zip" });
-      } else {
-        await context.tracing.stop();
-      }
-
       await context.close();
       // A just-closed Chrome profile can briefly hold a lock file open --
       // cleanup failing is not a reason to fail the test.

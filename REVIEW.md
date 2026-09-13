@@ -141,14 +141,137 @@ Concretely, in this session:
   undiscussed scope to add a removal retry loop. Worth a line in a future
   spec's "what to watch" if it's ever actually observed accumulating in CI.
 
+## CI confirmation (added by the review-fixes addendum, 2026-09-13)
+
+This section resolves `REVIEW-FLAGS.md`'s one `blocking` finding from this
+spec's review gate: the two CI-requiring acceptance criteria in
+`docs/specs/15-e2e-real-chrome.md` (the Resolved-note bullet, "the same
+[retries] holds in CI", and the separate CI bullet, "a real CI run ... shows
+the new `google-chrome --version` step printing a real version ... and the
+Playwright job green") are structurally unreachable by any build session
+under `loop.config.json`'s `push: false` — no build session ever pushes, and
+CI only runs on a push. Per `docs/specs/15-review-fixes-addendum.md`, Eric
+decided directly that the manager would push `spec-15` once, from outside
+the normal loop config, and read the real result. This section transcribes
+what actually happened, across two real CI runs, honestly — neither closes
+the criteria out.
+
+**First push (2026-09-13): `git push origin main spec-15`.** Pushed commits
+`d315efa`..`9ab4561` and the `spec-15` tag, triggering GitHub Actions run
+`34730091495` on commit `a91456a`.
+
+- `lint, tsc, vitest` job: green (lint, typecheck, all 635 unit tests).
+- `Playwright (login flow)` job: reported green by GitHub's own UI, but
+  every actual step after `Check for Supabase secrets` — `actions/checkout`,
+  `actions/setup-node`, `Install dependencies`, `Check for system Chrome`
+  (this spec's own new step), and `Build and run end-to-end tests` — was
+  skipped, not run. A skipped, `if:`-gated step still counts toward a
+  "successful" job in GitHub's UI, which is why the run showed green even
+  though the thing the acceptance criteria actually need to see —
+  `google-chrome --version` printing a real version, and the suite passing
+  under a real Chrome in CI — never executed.
+- Reason, read directly from the job log: `SKIPPING Playwright: repository
+  secrets not set: NEXT_PUBLIC_SUPABASE_URL ENCRYPTION_KEY`. `gh secret
+  list` confirmed only three of the five secrets the workflow checks were
+  set at the time (`E2E_USER_ID`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+  `SUPABASE_SERVICE_ROLE_KEY`); the other two were absent — a pre-existing,
+  upstream repository-configuration gap, unrelated to anything this spec's
+  own code built, and outside this addendum's authority to fix (secrets are
+  Eric's own action per `CLAUDE.md`'s Hard rules).
+- **Neither CI-requiring acceptance criterion was satisfied by this run.**
+
+**Second push (2026-09-13): secrets restored, a real result at last.** Eric
+restored `NEXT_PUBLIC_SUPABASE_URL` and `ENCRYPTION_KEY` as GitHub
+repository secrets. A later, unrelated push (spec 16's drafted-spec commit,
+`b45d7ae`, docs-only — no code from this spec or this addendum changed)
+triggered CI run `34734619475` on commit `b45d7ae`, and this time the
+Playwright job's steps actually ran instead of skipping:
+
+- `lint, tsc, vitest` job: green (lint, typecheck, 635 unit tests).
+- `Check for Supabase secrets`: passed — all five secrets now present,
+  confirmed by every subsequent step actually executing.
+- `Check for system Chrome`: passed, log line reads `Google Chrome
+  152.0.7977.82` — a real version, from the runner's preinstalled branded
+  Chrome (no `playwright install chrome` step exists after this spec's
+  change). **This satisfies the "`google-chrome --version` printing a real
+  version" half of the CI acceptance criterion.**
+- `Build and run end-to-end tests`: **28 passed, 1 failed, 1 skipped.** The
+  1 skipped is the pre-existing, already-documented `cron` positive-path
+  test (no `CRON_SECRET` set; unrelated to this spec). The 1 failed is
+  `e2e/settings-push.spec.ts:89` ("enabling creates one row for this
+  browser; disabling deletes it"), which ran through both of its configured
+  retries (`Retry #1`, `Retry #2`, both visible in the job log) and then
+  failed outright on `expect(page.getByText("Enabled on this
+  device.")).toBeVisible({ timeout: 60_000 })` — the real
+  `pushManager.subscribe()` handshake not resolving in time. `Retry #1`
+  additionally hit a harness-level `tracing.start: Tracing has been already
+  started` / `Cannot read properties of undefined (reading 'from')` error in
+  `e2e/fixtures.ts`/the test's own `afterEach` — a side effect of the retry
+  itself re-entering a fixture built for a single attempt, not a second,
+  independent failure of the app or the push path.
+- Overall job conclusion: **failure** — a real, non-skipped failure,
+  correctly reported as failure, unlike the first push's false-green skip.
+
+**What this does and does not confirm.** This is the first genuine CI
+execution of `settings-push.spec.ts` under a real branded Chrome with
+secrets present. It confirms the retry mechanism itself works correctly in
+CI exactly as designed: two retries fired, and the test failed outright
+rather than being silently skipped, per this spec's own "Decision: option
+3" ("After all retries are exhausted the test fails, it does not skip"). It
+does **not** confirm the suite is green in CI — it is not, this run. This is
+a real instance of the exact risk this spec's own Risks section named as
+credible and not yet confirmed either way: "a headless branded Chrome
+talking to Google's real push infrastructure from inside a CI runner is a
+genuinely different environment ... it is credible that it behaves
+differently there even though the local fix is sound." That risk has now
+materialized once.
+
+**Neither CI-requiring acceptance criterion is closed out — one sub-part is
+confirmed, the rest is not:**
+
+- *"`google-chrome --version` printing a real version"* — confirmed, this
+  run.
+- *"...and the Playwright job green"* — not confirmed; the job is red, for
+  the reason above.
+- *"The same [retry ceiling] holds in CI"* — partially confirmed: the
+  retry ceiling genuinely fired in CI (2 attempts, visible in the job log)
+  and the fail-outright-not-skip behavior held. The "green" half of that
+  same criterion is not met.
+
+**This is not yet this spec's own documented fallback trigger.** Its Risks
+section pre-committed to a specific threshold: "If CI shows this specific
+test failing after retries on three consecutive CI runs with no app-code
+change in between, convert it to a documented CI-only skip." This is the
+**first** CI run to reach this test at all (the prior run never got past the
+secrets-skip). One data point is not three consecutive ones — nothing is
+converted to a skip here, and no code changes. The next CI-triggering push
+is what would make this two of three, if it recurs.
+
+**Conclusion: both CI-requiring acceptance criteria remain open, not
+satisfied.** Not because of anything wrong with this spec's own code — the
+`channel: "chrome"` config and the `google-chrome --version` CI step both
+work exactly as designed — but because the real GCM handshake
+`settings-push.spec.ts` depends on did not complete in time under CI's
+network conditions, once. This will not be marked satisfied until a future
+CI run shows the suite actually green, or until three consecutive failures
+trigger the pre-committed fallback (a documented CI-only skip) per the
+Risks section. See `STATUS.md`'s Waiting on Eric section, updated alongside
+this addendum.
+
 ## What the next spec needs
 
 - Spec 11 (weekly-planning-and-invites) is next per `STATUS.md`'s Backlog —
   read `docs/specs/dojo-and-practice-layer-note.md` before drafting it, per
-  the existing note there.
+  the existing note there. Spec 16 (feed-calendar-and-summaries) is drafted
+  and queued ahead of it.
 - Any future e2e spec file should import `test`/`expect` from `./fixtures`,
   not `@playwright/test` directly — now written into
   `docs/CONVENTIONS.md#tests`.
-- `STATUS.md`'s Waiting on Eric list is otherwise unchanged by this spec:
-  `CRON_SECRET`, the Google Cloud Console steps for spec 08, and the Vercel
-  search-key verification are all still open and unrelated to this spec.
+- `STATUS.md`'s Waiting on Eric list changed by this addendum: the missing
+  `NEXT_PUBLIC_SUPABASE_URL`/`ENCRYPTION_KEY` secrets are now restored (see
+  above), but the still-open question is whether `settings-push.spec.ts`'s
+  real-GCM-handshake test is reliably green in CI at all — the next
+  CI-triggering push is the next real data point toward that, or toward the
+  spec's own three-consecutive-failures fallback. `CRON_SECRET`, the Google
+  Cloud Console steps for spec 08, and the Vercel search-key verification
+  are all still open and unrelated to this spec.

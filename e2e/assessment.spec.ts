@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 import { ABOUT_YOU_QUESTIONS, inventoryById } from "../lib/assessments/catalogue";
 import { encodeInventorySelection } from "../lib/assessments/flow";

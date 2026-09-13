@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixtures";
 
 /**
  * Spec 09 item 3 -- the Settings push subscribe/unsubscribe UI, against a
@@ -49,6 +49,19 @@ async function magicLinkTokenHash(admin: SupabaseClient, email: string): Promise
 }
 
 test.describe("settings: push notifications", () => {
+  // Resolved 2026-09-13 (NEEDS_HUMAN.md / GitHub issue #10, option 3): the
+  // real browser-level pushManager.subscribe() handshake (GCM/FCM, outside
+  // the app's own code) sometimes does not resolve within 15-20s even
+  // though subscribeToPush itself is correct. A bounded retry, scoped to
+  // this file only -- not playwright.config.ts's suite-wide retries: 1, and
+  // no retries added anywhere else in the suite. After 2 retries this still
+  // fails outright; it must not be converted to a skip.
+  // Also raises this file's own per-test timeout (playwright.config.ts's
+  // suite-wide 60_000 would otherwise cut the test off at the same instant
+  // as the 60s subscribe assertion below, leaving no room for the rest of
+  // the test).
+  test.describe.configure({ retries: 2, timeout: 90_000 });
+
   let admin: SupabaseClient;
   let userId: string;
 
@@ -75,13 +88,21 @@ test.describe("settings: push notifications", () => {
 
   test("enabling creates one row for this browser; disabling deletes it", async ({ page }) => {
     await page.getByRole("button", { name: "Enable push notifications" }).click();
-    await expect(page.getByText("Enabled on this device.")).toBeVisible({ timeout: 20_000 });
+    // Raised from 20s: registration.pushManager.subscribe() is a real
+    // browser-level GCM/FCM handshake that can take up to 60s (see the
+    // retries note above).
+    await expect(page.getByText("Enabled on this device.")).toBeVisible({ timeout: 60_000 });
 
     const { data: afterEnable } = await admin
       .from("push_subscriptions")
       .select("id, endpoint")
       .eq("user_id", userId);
     expect(afterEnable).toHaveLength(1);
+    // A real PushSubscription endpoint, not merely "no error was thrown, and
+    // a row exists" -- a hollow or malformed subscription must not pass.
+    expect(afterEnable?.[0]?.endpoint).toMatch(
+      /^https:\/\/(fcm|android)\.googleapis\.com\//,
+    );
 
     await page.getByRole("button", { name: "Disable" }).click();
     await expect(page.getByRole("button", { name: "Enable push notifications" })).toBeVisible({

@@ -305,6 +305,16 @@ the suite were reconfigured to drive a real installed Chrome (`channel:
 "chrome"`), a cross-cutting Playwright config change affecting every e2e
 test, not something this one item's scope covers. See `REVIEW.md`.
 
+**Amendment (spec 15): this gap is closed.** `playwright.config.ts`'s
+`chromium` project now sets `channel: "chrome"`, and every e2e spec file
+(except `cron-evaluation-prompts.spec.ts`, which never launches a browser)
+imports `test`/`expect` from the new `e2e/fixtures.ts` instead of
+`@playwright/test` directly — a shared per-test `launchPersistentContext`
+against a real, branded Chrome install. `settings-push.spec.ts`'s
+real-subscribe test now passes for real, with a new assertion on the
+created row's `endpoint` actually being a real GCM/FCM `https://` URL. See
+`docs/specs/15-e2e-real-chrome.md` and its `REVIEW.md` for the full account.
+
 ## CRM (spec 10)
 No new migration -- `contacts`, `interactions` and `invite_suggestions`
 (with their enums and RLS) were all already in spec 01's original migration,

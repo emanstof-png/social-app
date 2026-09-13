@@ -263,7 +263,11 @@ Playwright suites live under `e2e/` and run against `next build` + `next start`,
 never the dev server (`npm run test:e2e`, `playwright.config.ts`). CI runs
 `npm run lint`, `npm run typecheck` and `npm test` on every push, then the
 Playwright job under the four repository secrets, skipping cleanly and green if
-they are absent so a fork still builds.
+they are absent so a fork still builds. A new e2e spec imports `test`/`expect`
+from `./fixtures`, not `@playwright/test` directly (spec 15) — the suite
+drives a real installed Chrome through a shared per-test persistent context,
+since Push API testing needs a real Chrome build, not Playwright's bundled
+open-source Chromium.
 
 ## Scripts
 

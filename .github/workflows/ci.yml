@@ -87,9 +87,16 @@ jobs:
         if: steps.secrets.outputs.present == 'true'
         run: npm ci
 
-      - name: Install Playwright browser
+      # Spec 15: the suite drives a real installed Google Chrome
+      # (playwright.config.ts's channel: "chrome"), not a Playwright-managed
+      # download -- Playwright's installer does not provision a redistributable
+      # branded Chrome on Linux, it expects one already present. ubuntu-latest
+      # ships Google Chrome stable preinstalled; this fails loudly and
+      # specifically here if that ever stops being true, instead of surfacing
+      # as an oblique Playwright browser-launch error inside a test failure.
+      - name: Check for system Chrome
         if: steps.secrets.outputs.present == 'true'
-        run: npx playwright install --with-deps chromium
+        run: google-chrome --version
 
       - name: Build and run end-to-end tests
         if: steps.secrets.outputs.present == 'true'

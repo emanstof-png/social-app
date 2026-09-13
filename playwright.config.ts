@@ -39,7 +39,11 @@ export default defineConfig({
     baseURL,
     trace: "on-first-retry",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  // Spec 15: a real installed Google Chrome, not Playwright's bundled
+  // open-source Chromium. The bundled Chromium ships with no Google API key,
+  // so it cannot complete real GCM registration -- see docs/ARCHITECTURE.md's
+  // "Evaluation and push" section for the full diagnosis this fixes.
+  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"], channel: "chrome" } }],
 
   // Skipped when E2E_BASE_URL points at an already-running or deployed server.
   webServer: process.env.E2E_BASE_URL

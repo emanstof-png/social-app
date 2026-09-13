@@ -14,7 +14,7 @@ summaries on demand) is deferred in Out of scope with its reasoning.
 
 ## Prerequisites the human has to do first
 
-None. Migration 0019 is applied by the build session via `npm run migrate`.
+None. Migration 0020 is applied by the build session via `npm run migrate`.
 
 ## What is already built, do not rebuild
 
@@ -52,7 +52,7 @@ confirms the change survived.
 
 **2. Removing a commitment stops being destructive.** Three changes to one
 action:
-- Migration 0019 adds `removed` to the `selection_status` enum. `unselectOccurrence`
+- Migration 0020 adds `removed` to the `selection_status` enum. `unselectOccurrence`
   sets `status = 'removed'` instead of deleting the row. Every read path that
   counts a selection as committed (`committedOnly`, the feed's Added state, the
   calendar's card set, spec 09's evaluation-prompt cron) must exclude `removed`,

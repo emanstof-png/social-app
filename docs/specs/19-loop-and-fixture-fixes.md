@@ -69,6 +69,48 @@ inside the block.
 Low tier per `CLAUDE.md`: a one-file change to test fixture code, no
 migration, no server action, no app row written.
 
+**Resolved 2026-09-13 (Eric), superseding "The fix" above — read this
+before touching `e2e/fixtures.ts`.** The builder's first attempt applied
+"The fix" exactly as written above (teardown moved into `finally`,
+manual `context.tracing.start()`/`stop()` calls otherwise untouched) and
+it did not close the bug: the "after" run hit the identical `tracing.start:
+Tracing has been already started` error at the identical line, because
+Playwright's own automatic per-context trace-chunk hook now starts/stops
+tracing on any newly-created `BrowserContext` — including one from
+`chromium.launchPersistentContext`, bypassing the built-in `context`
+fixture entirely — whenever `on-first-retry` mode needs a trace for the
+attempt. On retry #1, that automatic hook and this fixture's own manual
+`tracing.start()` call both fire on the same fresh context, and the
+second one throws. This means the fixture's diagnosis above (a leaked
+context from skipped teardown) is not what produces the CI failures —
+the real conflict is the collision between manual and automatic tracing,
+present on every first retry regardless of whether teardown ran. Full
+finding and evidence in GitHub issue #12 / the builder's `NEEDS_HUMAN.md`
+(now resolved and deleted).
+
+**The actual fix, replacing "The fix" above:** remove the manual
+`context.tracing.start()`/`stop()` calls from the `context` fixture
+entirely. Keep the `try`/`finally` around `await use(context)`, but the
+`finally` block now only closes the context and removes the temp
+directory (same `testInfo.retry > 0` branch is gone with the manual
+calls — Playwright's own automatic hook already handles capturing and
+attaching the trace on a retried attempt, so nothing in the fixture needs
+to decide whether to keep one by hand anymore). Two things the build
+session must confirm, not just assume, before this item is done:
+
+1. During the "after" retry run, confirm a real `trace.zip` is actually
+   produced and attached for the retried attempt by Playwright's own
+   automatic hook — name the file path in `REVIEW.md`. If no trace lands
+   for a retried attempt, that is a silent loss of trace artifacts and a
+   fresh `NEEDS_HUMAN.md` stop, not something to accept and move past.
+2. This replaces item 1's original prescribed fix, so `REVIEW.md`'s
+   account of this item must say plainly that the fix changed from what
+   this spec originally described, point to this resolution note (and
+   issue #12) for why, and not present it as if this were the plan all
+   along — so a reviewer checking this item against the spec's original
+   text doesn't flag the removed manual tracing calls as an unexplained,
+   out-of-scope deviation.
+
 **Test — deliberately reproduce the bug locally, then confirm it's fixed.**
 Local runs default to `retries: 0` (`playwright.config.ts`); reproducing a
 retry outside CI needs an explicit override. Pick any existing, fast spec
@@ -191,7 +233,10 @@ Low tier — docs only.
   `--retries=1`, gets a second attempt against a genuinely fresh
   `context` — no `tracing.start: Tracing has been already started`
   error and no downstream `TypeError` from a fixture left in a broken
-  state by the first attempt's aborted teardown.
+  state by the first attempt's aborted teardown. Per the 2026-09-13
+  resolution note above, this retried attempt must also produce a real
+  `trace.zip`, attached via Playwright's own automatic on-first-retry
+  hook — `REVIEW.md` names the file path.
 - `npm run test:e2e`'s full suite still passes clean afterward, same pass
   count as spec 18's last clean run (33 passed, 1 skipped).
 - `docs/agents/BUILDER.md` states, in its own words, that a builder

@@ -21,7 +21,8 @@ which is a cross-cutting Playwright config change, not something scoped to
 one test file — which is why it was pulled forward ahead of spec 11, the
 same way 12a, 13 and 14 each jumped the queue once. No addendum exists for
 this spec number; none was needed; there is no note for it either. This spec
-ends with the entire `e2e/` suite driving a real Chrome-for-Testing build
+ends with the entire `e2e/` suite driving a real, branded Google Chrome
+install (not Playwright's own Chrome-for-Testing download — see item 4)
 through a shared per-test persistent browser context, `settings-push.spec.ts`
 passing for real, and one new shared import (`e2e/fixtures.ts`) that every
 e2e spec file — this one's and every later spec's — uses instead of
@@ -107,6 +108,37 @@ importing `test`/`expect` from `@playwright/test` directly.
    of a real browser launch; its correctness is exactly what the rest of
    this spec's acceptance criteria check. Low tier: new test-infra module,
    no app code, no migration.
+
+   **Notification permission — already handled, not new scope.**
+   `e2e/settings-push.spec.ts`'s own `beforeEach` already calls
+   `context.grantPermissions(["notifications"], { origin: baseURL })`
+   (confirmed by reading the file, not assumed) — a plain `BrowserContext`
+   method independent of how the context was created, so it needs no
+   change, and the fixture does not also pass `permissions:
+   ["notifications"]` to `launchPersistentContext` (redundant, and a
+   second source of truth for the same grant). What switching to a real
+   Chrome newly provides is the Push API existing in the browser at all;
+   the permission grant was never the blocked half of this gap.
+
+   **`e2e/settings-push.spec.ts` gains one assertion, its only test-content
+   change.** Its "enabling creates one row for this browser; disabling
+   deletes it" test already reads back `id, endpoint` from
+   `push_subscriptions` but only asserts the row count. This spec adds an
+   assertion on `endpoint`'s own shape — a real push-service URL
+   (`https://` at a known GCM/FCM host, e.g. `fcm.googleapis.com` or
+   `android.googleapis.com`) — so a hollow or malformed subscription
+   cannot pass as "no error was thrown, and a row exists." This is the one
+   test-content change this spec makes, and it is scoped to the file the
+   fix is actually for.
+
+   **Teardown removes the temp profile directory, not just the context.**
+   `fs.rm(dir, { recursive: true, force: true })` at teardown (already
+   described above) is restated here because it is load-bearing, not
+   incidental: without it, every test run leaves one throwaway Chrome
+   profile behind in `os.tmpdir()`, and a CI runner that never reboots
+   between jobs would accumulate them indefinitely. Acceptance criteria
+   below require proving this actually happens, not just that the code
+   calls it.
 3. **Every existing spec file's import line.** All eight files listed under
    "already built" above change `import { expect, test } from
    "@playwright/test"` to `import { expect, test } from "./fixtures"`
@@ -115,11 +147,27 @@ importing `test`/`expect` from `@playwright/test` directly.
    Purely mechanical — no assertion, no selector, no test body changes.
    Low tier, checkpointable as one item since it is the same one-line edit
    repeated eight times with nothing to design.
-4. **CI installs real Chrome.** `.github/workflows/ci.yml`'s `e2e` job:
-   `npx playwright install --with-deps chromium` becomes `npx playwright
-   install --with-deps chrome`. Nothing else in the job changes — the same
-   five secrets still gate whether it runs at all, `next build` still runs
-   first via `npm run test:e2e`. Low tier, CI config only.
+4. **CI verifies system Chrome instead of installing a Playwright-managed
+   browser.** `channel: "chrome"` (item 1) targets branded Google Chrome,
+   not the Chrome-for-Testing build Playwright's `install` command
+   downloads for the default `chromium` channel — on Linux, Playwright's
+   installer does not provision a redistributable branded Chrome/Edge
+   binary the way it does Chromium; it expects one already present via the
+   OS's own package manager. **Decision:** GitHub's `ubuntu-latest` hosted
+   runner image ships Google Chrome stable preinstalled (per GitHub's own
+   `runner-images` documentation), so this spec relies on that rather than
+   adding a `playwright install chrome` step, which would not reliably
+   provision anything on a Linux runner and risks a confusing failure mode
+   (a sudo prompt, or a silent no-op) instead of a clear one.
+   `.github/workflows/ci.yml`'s `e2e` job drops `npx playwright install
+   --with-deps chromium` entirely — nothing in the suite launches a
+   Playwright-managed Chromium once every spec imports from `./fixtures`
+   (item 3) — and gains one new step immediately before `next build`:
+   `google-chrome --version`, so a runner image without Chrome fails
+   loudly and specifically at that line instead of surfacing as an oblique
+   Playwright browser-launch error buried inside a test failure. Nothing
+   else in the job changes — the same five secrets still gate whether it
+   runs at all. Low tier, CI config only.
 5. **Docs.** `docs/CONVENTIONS.md#tests` gains one sentence: new e2e specs
    import `test`/`expect` from `./fixtures`, not `@playwright/test` directly,
    because the suite drives a real installed Chrome through a shared
@@ -138,7 +186,8 @@ importing `test`/`expect` from `@playwright/test` directly.
 
 **`channel: "chrome"` only — no Edge, no Firefox, no WebKit.** The diagnosis
 in `docs/ARCHITECTURE.md` is specific to the bundled open-source Chromium
-missing a real Google API key; real Chrome (Chrome for Testing) is the
+missing a real Google API key; a real, branded Google Chrome install (not
+Playwright's own Chrome-for-Testing download — see item 4's decision) is the
 documented fix for exactly that gap, and PRD §3.1's push requirement is
 phone-first in spirit but tested here on desktop Chrome the same way the
 rest of the suite already is — there is no reason to widen browser coverage
@@ -174,12 +223,13 @@ concretely what `docs/CONVENTIONS.md#tests`' new sentence tells a future
 drafting session to do.
 
 **No Prerequisites section.** Nothing here needs an account, a key, or an
-environment variable, and installing Chrome for Testing needs no human step
-outside the repo: `npx playwright install --with-deps chrome` (in place of
-`... chromium`) downloads its own copy the same way `chromium` already is,
-and `.claude/settings.json`'s existing `npx playwright *` allowlist entry
-already covers a builder session running it. Per `docs/specs/README.md`,
-the section is omitted rather than left empty.
+environment variable. `channel: "chrome"` needs a real Google Chrome already
+present on whatever machine runs the suite, not a Playwright-managed
+download — locally that is whatever Chrome is already installed on the
+developer's own machine (already the case on this repo's own build
+machine), and in CI it is `ubuntu-latest`'s own preinstalled Chrome (item
+4's decision), not a step this spec adds. Per `docs/specs/README.md`, the
+section is omitted rather than left empty.
 
 **`workers: 1` stays unchanged.** A `launchPersistentContext` call is
 heavier per test than reusing one shared browser process across ephemeral
@@ -205,10 +255,17 @@ touch, since real Chrome has nothing to do with a missing secret.
   open-source Chromium) via `e2e/fixtures.ts`'s persistent context, and
   every test passes, including `settings-push.spec.ts`'s "enabling creates
   one row for this browser; disabling deletes it" test — the one failure
-  named in `STATUS.md`'s most recent full-suite run. The only pre-existing
-  gap still allowed is `cron-evaluation-prompts.spec.ts`'s positive-path
-  test, which skips itself for the unrelated, already-documented
-  `CRON_SECRET` reason above, not for anything this spec touches.
+  named in `STATUS.md`'s most recent full-suite run. That test's own new
+  assertion must show the created row's `endpoint` is a real
+  `PushSubscription` endpoint (a `https://` URL at a known GCM/FCM host),
+  not merely that no error was thrown and a row exists. The only
+  pre-existing gap still allowed is `cron-evaluation-prompts.spec.ts`'s
+  positive-path test, which skips itself for the unrelated,
+  already-documented `CRON_SECRET` reason above, not for anything this
+  spec touches.
+- After a full suite run, no `gazelle-e2e-*` temporary profile directories
+  remain under `os.tmpdir()` — proving the fixture's teardown actually
+  removes each per-test profile rather than leaking one per test.
 - Running `npx playwright test e2e/settings-push.spec.ts` twice in a row,
   back to back, both passes — proving the per-test temp profile actually
   isolates state rather than merely passing once by accident.
@@ -219,13 +276,41 @@ touch, since real Chrome has nothing to do with a missing secret.
 - `feed.spec.ts`'s two-tab "clicking Select again... is a no-op" test still
   passes unchanged, proving `context.newPage()` behaves the same way under
   a persistent context as it did before.
-- A real CI run (or a faithful local reproduction of the `e2e` job's steps)
-  shows `npx playwright install --with-deps chrome` succeeding and the
-  Playwright job green.
+- A real CI run (or a faithful local reproduction of the `e2e` job's
+  steps) shows the new `google-chrome --version` step printing a real
+  version — proving the runner's preinstalled branded Chrome is what's
+  actually exercised, not a `playwright install chrome` step, since none
+  exists after this change — and the Playwright job green.
 - Per `CLAUDE.md`: `next build` passing is not enough. `REVIEW.md` must
   state that a production server (`next start`) served real authenticated
   requests under the new fixture for every test above, not only that the
   suite's exit code was zero.
+
+## Risks
+
+**Unconfirmed: headless branded Chrome completing a real GCM registration in
+CI.** Nobody has yet run `settings-push.spec.ts`'s real-subscribe test
+against a real Chrome in GitHub Actions specifically — everything in this
+spec's own reasoning (the diagnosis in `docs/ARCHITECTURE.md`, the decision
+to rely on `ubuntu-latest`'s preinstalled Chrome) is inference from what is
+documented about the bundled-Chromium failure mode and the runner image's
+contents, not a confirmed CI run. A headless branded Chrome talking to
+Google's real push infrastructure from inside a CI runner is a genuinely
+different environment from a developer's own machine (outbound network
+policy, headless flag interactions with GCM's own client checks, IP
+reputation), and it is credible that it behaves differently there even
+though the local fix is sound.
+
+**If the suite is green locally but `settings-push.spec.ts`'s real-subscribe
+test fails only in CI: do not loosen the test.** Weakening the assertion (or
+skipping it) to make CI green would silently re-open the exact gap this spec
+exists to close, without anyone deciding that on purpose. Instead, a build
+session that hits this must write a blocking review-gate flag (or, if it is
+found before the review gate, `NEEDS_HUMAN.md`) describing exactly what
+failed and how, and halt — this is Eric's decision to make, between a
+documented CI-only skip (with the reason recorded, not silently dropped) and
+running that one test headed, not headless, in CI. Both are legitimate
+outcomes; neither is this spec's own call to make unilaterally.
 
 ## Out of scope
 

@@ -103,6 +103,28 @@ session must confirm, not just assume, before this item is done:
    automatic hook — name the file path in `REVIEW.md`. If no trace lands
    for a retried attempt, that is a silent loss of trace artifacts and a
    fresh `NEEDS_HUMAN.md` stop, not something to accept and move past.
+
+   **This "after" run only — do not re-capture "before".** The "before"
+   evidence (the unmodified fixture failing retry #1 with `tracing.start:
+   Tracing has been already started`) already exists — the first build
+   session captured it directly and it is quoted in the now-resolved
+   `NEEDS_HUMAN.md` / GitHub issue #12. Getting a fresh "after" run only
+   needs the deliberately-throwing test (any temporary spec file, deleted
+   before committing, same as before) run once with
+   `npx playwright test <file> --retries=1` against `e2e/fixtures.ts` as
+   it now stands with the manual tracing calls removed — the file already
+   committed at HEAD when this build session starts. **Never revert,
+   restore, `git checkout`, or otherwise temporarily roll back
+   `e2e/fixtures.ts` to an earlier state to redo the "before" side of this
+   comparison** — this is the same shared-working-tree hazard Eric's
+   original instruction on this item already ruled out, and doing it to
+   *this* file specifically (rather than stashing it) is no safer: it was
+   attempted once already during this spec's own build (an interrupted
+   session left the working tree holding the pre-resolution incomplete
+   fixture, recovered by hand before the next session resumed). If the
+   "before" evidence is ever genuinely in question, re-derive it by
+   reading `git show 99a6b57:e2e/fixtures.ts` (or the equivalent tagged
+   commit) rather than checking that content out over the working file.
 2. This replaces item 1's original prescribed fix, so `REVIEW.md`'s
    account of this item must say plainly that the fix changed from what
    this spec originally described, point to this resolution note (and

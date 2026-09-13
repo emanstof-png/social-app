@@ -77,11 +77,24 @@ throws (`expect(true).toBe(false)`, or an assertion on some element that
 doesn't exist), then run
 `npx playwright test <file> --retries=1` twice:
 
-- **Before the fix** (stash the `finally` change, or check out the file
-  as it stands before this item): confirm the retry attempt fails with
-  the same two errors this bug produces — `tracing.start: Tracing has
-  been already started` and the `admin`-fixture `TypeError` — reproducing
-  the CI failure locally rather than trusting the CI log alone.
+- **Before the fix, run first, against `e2e/fixtures.ts` exactly as it
+  stands — do not edit the fixture yet.** **Resolved 2026-09-13 (Eric):**
+  do not use `git stash` or `git checkout` on `e2e/fixtures.ts` to produce
+  this before-state, even temporarily. The working tree is shared with
+  other sessions (the manager, possibly a concurrent loop run), and a
+  stash there is the exact mechanism `STATUS.md`'s "Shared working-tree
+  problem" note already records as having made the tree uncommittable for
+  everyone else once before. Sequence it as ordinary forward work instead:
+  add the deliberately-throwing test first (its own new, temporary
+  addition, not a modification of `fixtures.ts`), run
+  `npx playwright test <file> --retries=1` against the fixture unmodified,
+  and only *then* apply this item's `try`/`finally` edit to
+  `fixtures.ts` and re-run the same command. Confirm the "before" run
+  fails with the same two errors this bug produces — `tracing.start:
+  Tracing has been already started` and the `admin`-fixture `TypeError`
+  — reproducing the CI failure locally rather than trusting the CI log
+  alone. Capture both exact error strings into `REVIEW.md`'s account of
+  this item before moving on to the fix and the "after" run.
 - **After the fix**: confirm the retry attempt gets a genuinely fresh
   context (no tracing-already-started error) and fails (or passes, if the
   underlying assertion is nondeterministic) on its own merits, not on a

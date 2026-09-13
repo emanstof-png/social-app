@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 
-import type { CalendarDay } from "@/lib/feed/occurrences";
+import { ConfirmDialog } from "../confirm-dialog";
+import { isActiveSelection, type CalendarDay } from "@/lib/feed/occurrences";
 import { retryGoogleSync, selectOccurrence, unselectOccurrence } from "../feed/actions";
 import type { FeedCard } from "../feed/data";
 import { MonthGrid } from "../feed/month-grid";
@@ -90,18 +91,32 @@ export function CalendarView({
 }
 
 /** Deliberately more minimal than the Feed's card (PRD §2.5): title, time,
- * and the event-type badge only, no location/cost/recurrence text. */
+ * and the event-type badge only, no location/cost/recurrence text. Spec 17
+ * item 4 adds a "Where this came from" link and a quiet "Your community"
+ * marker, the same two facts Card already shows. */
 function MiniCard({ card, timezone }: { card: FeedCard; timezone: string }) {
   const [result, setResult] = useState<ActionResult | null>(null);
   const [pending, startTransition] = useTransition();
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
 
-  const selected = card.selection !== null;
+  // committedByDay (calendar/page.tsx) already excludes a `removed`
+  // selection, so every card reaching MiniCard is committed -- this stays
+  // `!== null` for the same reason Card checks the status too, in case that
+  // filtering ever changes.
+  const selected = card.selection !== null && isActiveSelection(card.selection.status);
 
-  function toggle() {
+  function select() {
     setResult(null);
     startTransition(async () => {
-      const action = selected ? unselectOccurrence : selectOccurrence;
-      setResult(await action(card.eventId, card.occurrenceAt));
+      setResult(await selectOccurrence(card.eventId, card.occurrenceAt));
+    });
+  }
+
+  function confirmRemove() {
+    setConfirmingRemove(false);
+    setResult(null);
+    startTransition(async () => {
+      setResult(await unselectOccurrence(card.eventId, card.occurrenceAt));
     });
   }
 
@@ -128,16 +143,40 @@ function MiniCard({ card, timezone }: { card: FeedCard; timezone: string }) {
           <p className="text-xs opacity-70">
             {time} · {typeLabel}
           </p>
+          {card.communityFocus ? (
+            <p className="text-[10px] uppercase tracking-wide opacity-60">Your community</p>
+          ) : null}
+          {card.sourceUrl ? (
+            <a
+              className="text-[10px] underline"
+              href={card.sourceUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Where this came from
+            </a>
+          ) : null}
         </div>
         <button
           type="button"
-          onClick={toggle}
+          onClick={selected ? () => setConfirmingRemove(true) : select}
           disabled={pending}
           className="rounded border border-current px-2 py-1 text-xs disabled:opacity-50"
         >
-          {pending ? "…" : selected ? "Added" : "Select"}
+          {pending ? "…" : selected ? "Remove" : "Select"}
         </button>
       </div>
+
+      <ConfirmDialog
+        open={confirmingRemove}
+        onCancel={() => setConfirmingRemove(false)}
+        onConfirm={confirmRemove}
+        title="Remove this event?"
+        description={`"${card.title}" will no longer be on your plan, and its Google Calendar entry will also be deleted.`}
+        confirmLabel="Remove"
+        busy={pending}
+      />
+
       {/* Persistent, from the stored selection -- survives a reload (spec 08
           item 8). Null means never attempted (no Google account connected). */}
       {selected && card.selection?.gcal_sync_status === "ok" ? (

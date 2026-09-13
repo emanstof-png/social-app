@@ -276,6 +276,79 @@ test.describe("assessment", () => {
       .toBe(answer);
   });
 
+  test("answering, going back two, changing an answer, and going forward keeps the change with no duplicate row (spec 17 item 1)", async ({
+    page,
+  }) => {
+    await seedRun(admin, userId);
+
+    const response = await page.goto("/assessment");
+    expect(response?.status(), "authenticated /assessment must not error").toBe(200);
+
+    const [q1, q2, q3, q4] = ABOUT_YOU_QUESTIONS;
+
+    // Back is absent/disabled on the very first question (acceptance
+    // criterion 2).
+    await expect(page.getByText(q1.text)).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole("button", { name: /back/i })).toBeDisabled();
+
+    await page.getByRole("textbox").first().fill("Answer to Q1.");
+    await page.getByRole("button", { name: "Next", exact: true }).click();
+
+    await expect(page.getByText(q2.text)).toBeVisible({ timeout: 20_000 });
+    await page.getByRole("textbox").first().fill("Original answer to Q2.");
+    await page.getByRole("button", { name: "Next", exact: true }).click();
+
+    await expect(page.getByText(q3.text)).toBeVisible({ timeout: 20_000 });
+    await page.getByRole("textbox").first().fill("Answer to Q3.");
+    await page.getByRole("button", { name: "Next", exact: true }).click();
+
+    // Now on Q4 (the live question). Back once lands on the editable Q3,
+    // back again on the editable Q2 -- "back two" from wherever you are.
+    await expect(page.getByText(q4.text)).toBeVisible({ timeout: 20_000 });
+    await page.getByRole("button", { name: /back/i }).click();
+    // q3 is already answered, so its text also appears in "Your answers so
+    // far" below -- the heading is the unambiguous one.
+    await expect(page.getByRole("heading", { name: q3.text })).toBeVisible();
+    await page.getByRole("button", { name: /back/i }).click();
+    await expect(page.getByRole("heading", { name: q2.text })).toBeVisible();
+    await expect(page.getByRole("textbox").first()).toHaveValue("Original answer to Q2.");
+
+    const changed = "Changed answer to Q2.";
+    await page.getByRole("textbox").first().fill(changed);
+    // Saving an edited answer both writes it and moves forward, back to
+    // wherever the interview actually is (Q4) -- there is nothing further
+    // to answer at Q2 or Q3 once they are already answered.
+    await page.getByRole("button", { name: "Save this answer" }).click();
+    await expect(page.getByText(q4.text)).toBeVisible({ timeout: 20_000 });
+
+    // The database shows the changed answer, once -- no duplicate row.
+    await expect
+      .poll(
+        async () => {
+          const { data } = await admin
+            .from("assessment_answers")
+            .select("answer")
+            .eq("user_id", userId)
+            .eq("question_id", `about_you:${q2.key}`);
+          return data;
+        },
+        { message: "the edited answer must reach the database, with no duplicate row" },
+      )
+      .toEqual([expect.objectContaining({ answer: changed })]);
+
+    // Q1 and Q3 are untouched by editing Q2.
+    const { data: rest } = await admin
+      .from("assessment_answers")
+      .select("question_id, answer")
+      .eq("user_id", userId)
+      .in("question_id", [`about_you:${q1.key}`, `about_you:${q3.key}`])
+      .order("question_id");
+    // Ordered by question_id string, not interview order.
+    const byQuestionId = new Map(rest?.map((row) => [row.question_id, row.answer]));
+    expect(byQuestionId.get(`about_you:${q1.key}`)).toBe("Answer to Q1.");
+    expect(byQuestionId.get(`about_you:${q3.key}`)).toBe("Answer to Q3.");
+  });
+
   test("the results page shows the persona and the inventory scored in code", async ({
     page,
   }) => {

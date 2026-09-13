@@ -58,9 +58,10 @@ export default async function FeedPage({ searchParams }: PageProps<"/feed">) {
 
   // The grid's day markers use the feed's own unfiltered set (spec 16 item
   // 5) -- the same groupByDay result the card list already renders, not a
-  // second read or a re-derived "has an event" check.
-  const hasEventsOn = new Set(data.byDay.map((group) => group.day));
-  const grid = monthGrid(year, month, hasEventsOn);
+  // second read or a re-derived "has an event" check. Each day's count feeds
+  // the density indicator too (spec 17 item 3).
+  const eventCountOn = new Map(data.byDay.map((group) => [group.day, group.items.length]));
+  const grid = monthGrid(year, month, eventCountOn);
 
   return (
     <FeedView

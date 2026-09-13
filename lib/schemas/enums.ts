@@ -29,7 +29,14 @@ export const communityStatus = z.enum([
 
 export const eventType = z.enum(["community_event", "community_general", "one_off"]);
 
-export const selectionStatus = z.enum(["planned", "attended", "skipped"]);
+/**
+ * Spec 17. `removed` is added by `alter type ... add value` in migration
+ * 0020, so in Postgres it sits at the end of the enum rather than next to
+ * `skipped`; the order of labels here is cosmetic either way. A soft delete
+ * for `unselectOccurrence` (docs/CONVENTIONS.md#status-over-delete) -- the
+ * row is kept, never a fourth kind of committed state.
+ */
+export const selectionStatus = z.enum(["planned", "attended", "skipped", "removed"]);
 
 export const preferenceEntityType = z.enum(["genre", "community", "venue"]);
 

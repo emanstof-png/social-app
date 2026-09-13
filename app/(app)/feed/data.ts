@@ -57,6 +57,9 @@ export type FeedCard = {
   rsvpUrl: string | null;
   /** The scrape-time summary (spec 16 item 1) -- never user-written. */
   description: string | null;
+  /** communities.focus (spec 17 item 4): "one of my few current communities"
+   * (PRD §1.7), user-owned, never written by discovery. */
+  communityFocus: boolean;
   selection: SelectionRow | null;
 };
 
@@ -128,17 +131,21 @@ export async function readEvents(supabase: Db, userId: string): Promise<FeedSour
 export async function readCommunitiesById(
   supabase: Db,
   userId: string,
-): Promise<Map<string, { name: string; status: string }>> {
+): Promise<Map<string, { name: string; status: string; focus: boolean }>> {
   const { data, error } = await supabase
     .from("communities")
-    .select("id, name, status")
+    .select("id, name, status, focus")
     .eq("user_id", userId);
 
   if (error) throw new Error(`Could not read your communities: ${error.message}`);
 
-  const byId = new Map<string, { name: string; status: string }>();
+  const byId = new Map<string, { name: string; status: string; focus: boolean }>();
   for (const row of data ?? []) {
-    byId.set(row.id as string, { name: row.name as string, status: row.status as string });
+    byId.set(row.id as string, {
+      name: row.name as string,
+      status: row.status as string,
+      focus: row.focus as boolean,
+    });
   }
   return byId;
 }
@@ -228,6 +235,7 @@ export async function loadFeedData(
         sourceUrl: event.source_url,
         rsvpUrl: event.rsvp_url,
         description: event.description,
+        communityFocus: community.focus,
         selection:
           selectionsByKey.get(occurrenceKey(occurrence.eventId, occurrence.occurrenceAt)) ?? null,
       });

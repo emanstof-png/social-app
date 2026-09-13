@@ -1,0 +1,12 @@
+-- gazelle spec 17 item 2 -- selections.status gains 'removed'
+--
+-- Enum change alone, in its own file (docs/CONVENTIONS.md#migrations):
+-- Postgres cannot use a newly added label in the same transaction that adds
+-- it. unselectOccurrence (app/(app)/feed/actions.ts) moves from deleting the
+-- row to setting status = 'removed' -- a soft delete, not a fourth kind of
+-- committed state. Every read path that treats a selection as committed
+-- already narrows to 'planned'/'attended' (committedOnly, the evaluation
+-- cron's own filter) or to 'attended' alone (people/data.ts), so none of
+-- them need a change to exclude 'removed' -- it was never in their allow
+-- list to begin with.
+alter type public.selection_status add value if not exists 'removed';

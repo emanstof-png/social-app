@@ -129,6 +129,13 @@ async function writeSyncColumns(
  * second call with the same (eventId, occurrenceAt) is a no-op, not a
  * duplicate or an error -- and, per the same idempotence, a repeat Select on
  * an occurrence already synced to Google never fires a second calendar event.
+ *
+ * `ignoreDuplicates` is deliberately `false` (spec 17 item 2): a `removed`
+ * row already exists at this conflict key once something has been Removed
+ * and re-Selected, and that row has to come back to `planned`, not be
+ * silently left as `removed` by an upsert that skips conflicts outright. The
+ * gcal_* columns are left out of the payload on purpose, so a genuine repeat
+ * Select on an already-synced row leaves them untouched.
  */
 export async function selectOccurrence(
   eventId: string,
@@ -156,7 +163,7 @@ export async function selectOccurrence(
         selected_at: new Date().toISOString(),
         status: "planned",
       },
-      { onConflict: "user_id,event_id,occurrence_at", ignoreDuplicates: true },
+      { onConflict: "user_id,event_id,occurrence_at" },
     );
 
     if (error) throw new Error(`Could not add that to your plan: ${error.message}`);
@@ -182,10 +189,18 @@ export async function selectOccurrence(
   }
 }
 
-/** RLS grants delete on selections (unlike communities/events); see the
- * spec's drafting decision on why this is a delete, not a fourth status.
- * The Google-side delete is best-effort (spec 08 item 6): its outcome is
- * only ever reflected in the returned note, never blocks the local delete. */
+/**
+ * Soft delete (spec 17 item 2; docs/CONVENTIONS.md#status-over-delete): sets
+ * `status = 'removed'` rather than deleting the row, so a future spec can
+ * offer a removed-items view with no migration. Called only after the
+ * caller's own confirm dialog (docs/CONVENTIONS.md#dialogs) -- dismissing it
+ * never reaches this action at all.
+ *
+ * The gcal_* columns are cleared alongside the status: the Google Calendar
+ * entry is genuinely deleted below, so a stale gcal_event_id/gcal_sync_status
+ * left in place would make a later re-Select (selectOccurrence) believe the
+ * occurrence is already synced to an event that no longer exists.
+ */
 export async function unselectOccurrence(
   eventId: string,
   occurrenceAt: string,
@@ -216,7 +231,13 @@ export async function unselectOccurrence(
 
     const { error } = await supabase
       .from("selections")
-      .delete()
+      .update({
+        status: "removed",
+        gcal_event_id: null,
+        gcal_sync_status: null,
+        gcal_sync_error_kind: null,
+        gcal_sync_error_message: null,
+      })
       .eq("user_id", userId)
       .eq("event_id", id)
       .eq("occurrence_at", at);

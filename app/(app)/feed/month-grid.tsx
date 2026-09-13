@@ -32,6 +32,21 @@ function formatDayLabel(day: string): string {
 
 const WEEKDAY_HEADERS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
+/** The day cell's accessible name carries the count in words (spec 17 item
+ * 3) -- the density indicator itself is decorative (aria-hidden). */
+function countLabel(step: 0 | 1 | 2 | 3): string {
+  switch (step) {
+    case 0:
+      return "no events";
+    case 1:
+      return "one event";
+    case 2:
+      return "two events";
+    case 3:
+      return "three or more events";
+  }
+}
+
 function shiftMonth(year: number, month: number, delta: number): string {
   const total = year * 12 + (month - 1) + delta;
   const y = Math.floor(total / 12);
@@ -125,15 +140,25 @@ export function MonthGrid({
           <button
             key={day.date}
             type="button"
-            aria-label={`Day ${day.date}`}
+            aria-label={`Day ${day.date}, ${countLabel(day.densityStep)}`}
             onClick={() => handleDayClick(day.date)}
-            className={`rounded border p-2 ${
+            className={`flex flex-col items-center gap-1 rounded border p-2 ${
               day.inMonth
                 ? "border-black/10 dark:border-white/15"
                 : "border-transparent opacity-30"
             } ${day.hasEvents ? "bg-foreground/10 font-medium" : ""}`}
           >
-            {Number(day.date.slice(-2))}
+            <span>{Number(day.date.slice(-2))}</span>
+            <span aria-hidden="true" className="flex gap-0.5">
+              {[1, 2, 3].map((step) => (
+                <span
+                  key={step}
+                  className={`h-1 w-1 rounded-full ${
+                    day.densityStep >= step ? "bg-foreground" : "bg-foreground/15"
+                  }`}
+                />
+              ))}
+            </span>
           </button>
         ))}
       </div>

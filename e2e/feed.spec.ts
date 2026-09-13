@@ -263,7 +263,7 @@ test.describe("feed", () => {
     await clearFixture(admin, userId);
   });
 
-  test("selecting a card writes a selections row; clicking Added removes it", async ({
+  test("selecting a card writes a selections row; confirming Remove soft-deletes it (spec 17 item 2)", async ({
     page,
   }) => {
     await expect(page.getByText(FIXTURE_TITLE)).toBeVisible({ timeout: 20_000 });
@@ -272,8 +272,8 @@ test.describe("feed", () => {
     await expect(card.getByRole("button", { name: "Select" })).toBeVisible();
     await card.getByRole("button", { name: "Select" }).click();
 
-    const addedButton = card.getByRole("button", { name: "Added" });
-    await expect(addedButton).toBeVisible({ timeout: 10_000 });
+    const removeButton = card.getByRole("button", { name: "Remove" });
+    await expect(removeButton).toBeVisible({ timeout: 10_000 });
 
     // Read back with the admin client, not inferred from the UI alone.
     await expect
@@ -281,33 +281,85 @@ test.describe("feed", () => {
         async () => {
           const { data } = await admin
             .from("selections")
-            .select("id")
+            .select("status")
             .eq("user_id", userId)
             .eq("event_id", FIXTURE_EVENT_ID)
             .maybeSingle();
-          return data !== null;
+          return data?.status ?? null;
         },
-        { message: "a selections row must exist after Select", timeout: 20_000 },
+        { message: "a selections row must exist as 'planned' after Select", timeout: 20_000 },
       )
-      .toBe(true);
+      .toBe("planned");
 
-    await addedButton.click();
+    // Clicking Remove opens a confirm dialog naming the event (acceptance
+    // criterion 3); it does not unselect on its own.
+    await removeButton.click();
+    const dialog = page.getByRole("dialog", { name: "Remove this event?" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText(FIXTURE_TITLE);
+
+    await dialog.getByRole("button", { name: "Remove" }).click();
     await expect(card.getByRole("button", { name: "Select" })).toBeVisible({ timeout: 10_000 });
 
+    // The row still exists (status over delete, docs/CONVENTIONS.md), now
+    // 'removed', not gone (acceptance criterion 4).
     await expect
       .poll(
         async () => {
           const { data } = await admin
             .from("selections")
-            .select("id")
+            .select("status")
             .eq("user_id", userId)
             .eq("event_id", FIXTURE_EVENT_ID)
             .maybeSingle();
-          return data !== null;
+          return data?.status ?? null;
         },
-        { message: "the selections row must be gone after unselect", timeout: 20_000 },
+        { message: "the selections row must be 'removed', not deleted, after confirming", timeout: 20_000 },
       )
-      .toBe(false);
+      .toBe("removed");
+  });
+
+  test("dismissing the Remove dialog leaves the selection committed and makes no Google Calendar call (spec 17 item 2)", async ({
+    page,
+  }) => {
+    await expect(page.getByText(FIXTURE_TITLE)).toBeVisible({ timeout: 20_000 });
+
+    const card = page.locator("article", { hasText: FIXTURE_TITLE });
+    await card.getByRole("button", { name: "Select" }).click();
+    const removeButton = card.getByRole("button", { name: "Remove" });
+    await expect(removeButton).toBeVisible({ timeout: 10_000 });
+
+    const { data: beforeRow } = await admin
+      .from("selections")
+      .select("status, updated_at")
+      .eq("user_id", userId)
+      .eq("event_id", FIXTURE_EVENT_ID)
+      .maybeSingle();
+    expect(beforeRow?.status).toBe("planned");
+
+    const calendarCalls: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("googleapis.com")) calendarCalls.push(request.url());
+    });
+
+    await removeButton.click();
+    const dialog = page.getByRole("dialog", { name: "Remove this event?" });
+    await expect(dialog).toBeVisible();
+
+    // Dismissing -- Cancel -- does nothing at all.
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(card.getByRole("button", { name: "Remove" })).toBeVisible();
+
+    const { data: afterRow } = await admin
+      .from("selections")
+      .select("status, updated_at")
+      .eq("user_id", userId)
+      .eq("event_id", FIXTURE_EVENT_ID)
+      .maybeSingle();
+    expect(afterRow?.status).toBe("planned");
+    expect(afterRow?.updated_at).toBe(beforeRow?.updated_at);
+    expect(calendarCalls, "dismissing must never call Google Calendar").toHaveLength(0);
   });
 
   test("clicking Select again on the same card is a no-op, not a duplicate row", async ({
@@ -331,7 +383,7 @@ test.describe("feed", () => {
     const card2 = page2.locator("article", { hasText: FIXTURE_TITLE });
 
     await card1.getByRole("button", { name: "Select" }).click();
-    await expect(card1.getByRole("button", { name: "Added" })).toBeVisible({ timeout: 10_000 });
+    await expect(card1.getByRole("button", { name: "Remove" })).toBeVisible({ timeout: 10_000 });
 
     // page2 was never reloaded, so its button still reads "Select" from its
     // original render -- clicking it fires a second real selectOccurrence
@@ -373,11 +425,11 @@ test.describe("feed", () => {
     // Selecting the first occurrence must not mark the second (or any other)
     // occurrence of the same event as selected.
     await first.getByRole("button", { name: "Select" }).click();
-    await expect(first.getByRole("button", { name: "Added" })).toBeVisible({ timeout: 10_000 });
+    await expect(first.getByRole("button", { name: "Remove" })).toBeVisible({ timeout: 10_000 });
     await expect(second.getByRole("button", { name: "Select" })).toBeVisible();
 
     await second.getByRole("button", { name: "Select" }).click();
-    await expect(second.getByRole("button", { name: "Added" })).toBeVisible({ timeout: 10_000 });
+    await expect(second.getByRole("button", { name: "Remove" })).toBeVisible({ timeout: 10_000 });
 
     await expect
       .poll(
@@ -407,20 +459,37 @@ test.describe("feed", () => {
     );
 
     // Unselecting one occurrence must leave the other's row untouched.
-    await first.getByRole("button", { name: "Added" }).click();
+    await first.getByRole("button", { name: "Remove" }).click();
+    await first.getByRole("dialog", { name: "Remove this event?" }).getByRole("button", { name: "Remove" }).click();
     await expect(first.getByRole("button", { name: "Select" })).toBeVisible({ timeout: 10_000 });
-    await expect(second.getByRole("button", { name: "Added" })).toBeVisible();
+    await expect(second.getByRole("button", { name: "Remove" })).toBeVisible();
 
+    // The removed occurrence's row still exists (status over delete), so
+    // this reads the still-active one specifically rather than the whole
+    // table by event id (spec 17 item 2).
     const { data: remaining, error: remainingError } = await admin
       .from("selections")
-      .select("occurrence_at")
+      .select("occurrence_at, status")
       .eq("user_id", userId)
       .eq("event_id", FIXTURE_RECURRING_EVENT_ID)
+      .eq("status", "planned")
       .maybeSingle();
     expect(remainingError).toBeNull();
     expect(remaining).not.toBeNull();
     expect(new Date(remaining!.occurrence_at as string).getTime()).toBe(
       recurringSecondOccurrenceAt.getTime(),
+    );
+
+    const { data: removedRow, error: removedError } = await admin
+      .from("selections")
+      .select("occurrence_at, status")
+      .eq("user_id", userId)
+      .eq("event_id", FIXTURE_RECURRING_EVENT_ID)
+      .eq("status", "removed")
+      .maybeSingle();
+    expect(removedError).toBeNull();
+    expect(new Date(removedRow!.occurrence_at as string).getTime()).toBe(
+      recurringStartsAt.getTime(),
     );
   });
 
@@ -438,7 +507,7 @@ test.describe("feed", () => {
     await expect(page.getByText(FIXTURE_TITLE)).toBeVisible({ timeout: 20_000 });
     const feedCard = page.locator("article", { hasText: FIXTURE_TITLE });
     await feedCard.getByRole("button", { name: "Select" }).click();
-    await expect(feedCard.getByRole("button", { name: "Added" })).toBeVisible({
+    await expect(feedCard.getByRole("button", { name: "Remove" })).toBeVisible({
       timeout: 10_000,
     });
 
@@ -448,17 +517,18 @@ test.describe("feed", () => {
     await expect(page).toHaveURL(/\/calendar/);
 
     // The Calendar's MiniCard has no test id; its title <p> and the
-    // Select/Added button are two levels apart (title -> label wrapper div ->
+    // Select/Remove button are two levels apart (title -> label wrapper div ->
     // the row div that also holds the button), so walk up from the title.
     const calTitle = page.getByText(FIXTURE_TITLE, { exact: true });
-    const calRow = calTitle.locator("xpath=../..");
-    await expect(calRow.getByRole("button", { name: "Added" })).toBeVisible({ timeout: 10_000 });
+    const calRow = calTitle.locator("xpath=../../..");
+    await expect(calRow.getByRole("button", { name: "Remove" })).toBeVisible({ timeout: 10_000 });
 
     // /calendar is committed-only (spec 07 addendum: calendar-and-community-
     // fields, decision 1) -- unselecting here removes the entry from the
     // list entirely rather than toggling it back to a "Select" state in
     // place, since it no longer has a committed selection to show.
-    await calRow.getByRole("button", { name: "Added" }).click();
+    await calRow.getByRole("button", { name: "Remove" }).click();
+    await calRow.getByRole("dialog", { name: "Remove this event?" }).getByRole("button", { name: "Remove" }).click();
     await expect(page.getByText(FIXTURE_TITLE)).toHaveCount(0, { timeout: 10_000 });
 
     await page.getByRole("link", { name: "Feed", exact: true }).click();
@@ -503,7 +573,7 @@ test.describe("feed", () => {
       await card.getByRole("button", { name: "Select" }).click();
 
       // The local plan is saved regardless of the sync outcome.
-      await expect(card.getByRole("button", { name: "Added" })).toBeVisible({ timeout: 20_000 });
+      await expect(card.getByRole("button", { name: "Remove" })).toBeVisible({ timeout: 20_000 });
 
       // A real sync failure is visible on the card, with a Retry control.
       const retry = card.getByRole("button", { name: "Retry" });
@@ -548,7 +618,7 @@ test.describe("feed", () => {
     await expect(page).toHaveURL(/\/feed/);
     const card = page.locator("article", { hasText: FIXTURE_TITLE });
     await card.getByRole("button", { name: "Select" }).click();
-    await expect(card.getByRole("button", { name: "Added" })).toBeVisible({ timeout: 10_000 });
+    await expect(card.getByRole("button", { name: "Remove" })).toBeVisible({ timeout: 10_000 });
 
     await page.getByRole("link", { name: "Calendar" }).click();
     await expect(page).toHaveURL(/\/calendar/);
@@ -561,7 +631,7 @@ test.describe("feed", () => {
     await expect(page.getByText(FIXTURE_TITLE)).toBeVisible({ timeout: 20_000 });
     const feedCard = page.locator("article", { hasText: FIXTURE_TITLE });
     await feedCard.getByRole("button", { name: "Select" }).click();
-    await expect(feedCard.getByRole("button", { name: "Added" })).toBeVisible({ timeout: 10_000 });
+    await expect(feedCard.getByRole("button", { name: "Remove" })).toBeVisible({ timeout: 10_000 });
 
     await page.getByRole("link", { name: "Calendar" }).click();
     await expect(page).toHaveURL(/\/calendar/);

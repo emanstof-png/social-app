@@ -65,10 +65,11 @@ export default async function CalendarPage({
   // browse-and-pick list. /feed stays unfiltered.
   const committedByDay = groupByDay(committedOnly(data.cards), profile.timezone);
 
-  // The set groupByDay already produced -- the grid never recomputes what
-  // counts as "has an event."
-  const hasEventsOn = new Set(committedByDay.map((group) => group.day));
-  const grid = monthGrid(year, month, hasEventsOn);
+  // The counts groupByDay already produced -- the grid never recomputes what
+  // counts as "has an event," and the same counts drive the density
+  // indicator (spec 17 item 3).
+  const eventCountOn = new Map(committedByDay.map((group) => [group.day, group.items.length]));
+  const grid = monthGrid(year, month, eventCountOn);
 
   return (
     <CalendarView

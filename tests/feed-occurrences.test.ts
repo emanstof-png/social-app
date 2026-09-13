@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   committedOnly,
+  densityStep,
   expandOccurrences,
   groupByDay,
+  isActiveSelection,
   monthGrid,
   nearestDay,
   parseMonthParam,
@@ -210,10 +212,32 @@ describe("groupByDay", () => {
   });
 });
 
+describe("densityStep", () => {
+  it("maps a day's event count to one of four steps", () => {
+    expect(densityStep(0)).toBe(0);
+    expect(densityStep(1)).toBe(1);
+    expect(densityStep(2)).toBe(2);
+    expect(densityStep(3)).toBe(3);
+    expect(densityStep(9)).toBe(3);
+  });
+
+  it("treats a negative count the same as zero", () => {
+    expect(densityStep(-1)).toBe(0);
+  });
+});
+
 describe("monthGrid", () => {
-  it("builds a Sunday-start grid marking in-month days and hasEvents", () => {
+  it("builds a Sunday-start grid marking in-month days, hasEvents and densityStep", () => {
     // September 2026 starts on a Tuesday and has 30 days.
-    const grid = monthGrid(2026, 9, new Set(["2026-09-08", "2026-10-01"]));
+    const grid = monthGrid(
+      2026,
+      9,
+      new Map([
+        ["2026-09-08", 1],
+        ["2026-09-15", 3],
+        ["2026-10-01", 2],
+      ]),
+    );
 
     expect(grid[0]).toHaveLength(7);
     // Every week is exactly 7 days.
@@ -226,22 +250,41 @@ describe("monthGrid", () => {
     const leadIn = flat.find((day) => day.date === "2026-08-31");
     expect(leadIn?.inMonth).toBe(false);
 
-    const marked = flat.find((day) => day.date === "2026-09-08");
-    expect(marked?.hasEvents).toBe(true);
+    const one = flat.find((day) => day.date === "2026-09-08");
+    expect(one?.hasEvents).toBe(true);
+    expect(one?.densityStep).toBe(1);
 
-    // hasEventsOn beyond this month's own grid days does not leak in.
+    const three = flat.find((day) => day.date === "2026-09-15");
+    expect(three?.hasEvents).toBe(true);
+    expect(three?.densityStep).toBe(3);
+
+    // eventCountOn beyond this month's own grid days does not leak in.
     const unrelated = flat.find((day) => day.date === "2026-09-09");
     expect(unrelated?.hasEvents).toBe(false);
+    expect(unrelated?.densityStep).toBe(0);
+  });
+});
+
+describe("isActiveSelection", () => {
+  it("is true for planned and attended, false for skipped, removed, null and undefined", () => {
+    expect(isActiveSelection("planned")).toBe(true);
+    expect(isActiveSelection("attended")).toBe(true);
+    expect(isActiveSelection("skipped")).toBe(false);
+    expect(isActiveSelection("removed")).toBe(false);
+    expect(isActiveSelection(null)).toBe(false);
+    expect(isActiveSelection(undefined)).toBe(false);
   });
 });
 
 describe("committedOnly", () => {
-  it("keeps planned and attended, drops skipped and unselected", () => {
+  it("keeps planned and attended, drops skipped, removed and unselected", () => {
     const cards = [
       { id: "a", selection: { status: "planned" } },
       { id: "b", selection: { status: "attended" } },
       { id: "c", selection: { status: "skipped" } },
       { id: "d", selection: null },
+      // spec 17 item 2: a soft-removed selection is not committed.
+      { id: "e", selection: { status: "removed" } },
     ];
     expect(committedOnly(cards).map((c) => c.id)).toEqual(["a", "b"]);
   });

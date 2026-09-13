@@ -18,7 +18,7 @@
 - `discovery_runs` — activity_id, location, status (running | complete | failed | empty), rounds_done, searches_used, pages_read, communities_found, empty_rounds, last_error, started_at, finished_at. One row per discovery run; a run advances one round per request, so this is also what makes an interrupted run resumable (spec 05).
 - `search_log` — provider (exa | tavily | serper), query, discovery_run_id, result_count, status, error_kind, error_message, latency_ms. One row per search API call, successful or not, so a fall-through is visible rather than inferred. Separate from `run_log` because a search call has no tokens, no cost and no output schema, and does have a query and a result count (spec 05).
 - `events` — community_id, title, starts_at, ends_at, location, address, cost, event_type (community_event | community_general | one_off), source_url, rsvp_url, recurrence, registration_required, capacity, scraped_at, dedupe_hash (unique). From spec 16 (migration 0018): description (nullable text) — a one-sentence scrape-time summary, never user-written; null when the source gives nothing beyond a title and a time.
-- `selections` — event_id, occurrence_at (spec 07: the specific dated instance selected, required on every row including a non-recurring event's, where it equals that event's own starts_at), selected_at, gcal_event_id, status (planned | attended | skipped). Unique on (user_id, event_id, occurrence_at), widened from (user_id, event_id) in migration 0012 so one recurring event can have more than one independently-selected occurrence. From spec 08 (migration 0015): gcal_sync_status/gcal_sync_error_kind/gcal_sync_error_message, reusing run_status/run_error_kind verbatim — null on all three means Google Calendar was never connected when this row was last written, not a failure.
+- `selections` — event_id, occurrence_at (spec 07: the specific dated instance selected, required on every row including a non-recurring event's, where it equals that event's own starts_at), selected_at, gcal_event_id, status (planned | attended | skipped | removed). Unique on (user_id, event_id, occurrence_at), widened from (user_id, event_id) in migration 0012 so one recurring event can have more than one independently-selected occurrence. From spec 08 (migration 0015): gcal_sync_status/gcal_sync_error_kind/gcal_sync_error_message, reusing run_status/run_error_kind verbatim — null on all three means Google Calendar was never connected when this row was last written, not a failure. `removed` (migration 0020, spec 17) is a soft delete: `unselectOccurrence` sets it instead of deleting the row — see "First fine-tuning pass" below.
 - `google_accounts` — one connected Google account per user (spec 08, migration 0015): email, access_token and refresh_token (ciphertext via encryptSecret, the same scheme provider_keys.key uses), token_expires_at. Deletable, not status-over-delete, same as provider_keys.
 - `evaluations` — event_id, attended, liked, connections_quality (1-5), culture_notes, ease_of_meeting (1-5), answered_at.
 - `preference_log` — entity_type (genre | community | venue), entity_id/name, liked (bool), note, logged_at.
@@ -668,3 +668,53 @@ last reported by the builder), which agent is running, elapsed time this run, th
 the next action, and the halt reason once one exists. Meant to be watched in an editor while the
 loop runs — it is a live view, not a record, which is why it isn't committed; `REVIEW.md` and
 `STATUS.md` stay the durable account of what actually happened.
+
+## First fine-tuning pass (spec 17)
+
+**Removing a commitment is a soft delete, not a delete.** Migration 0020 adds
+`removed` to `selection_status`. `unselectOccurrence`
+(`app/(app)/feed/actions.ts`) now sets `status = 'removed'` and clears the
+four `gcal_*` columns instead of deleting the row — the Google Calendar
+entry is still genuinely deleted first; only the local row survives. Clicking
+the button (now labelled `Remove`, not the old `Added`) opens
+`app/(app)/confirm-dialog.tsx`'s `ConfirmDialog` naming the event; dismissing
+runs nothing. `lib/feed/occurrences.ts#isActiveSelection` (`planned` or
+`attended`) is the one place "is this selection still committed" is decided —
+`committedOnly` and both card components' `selected` flag call it, so a
+`removed` row reads the same as no selection at all everywhere, and a future
+status added to the enum only needs reasoning about once. `selectOccurrence`'s
+upsert no longer sets `ignoreDuplicates: true`: reselecting a `removed`
+occurrence has to flip it back to `planned` on conflict, not be silently
+skipped.
+
+**Event density is a four-step indicator, not a count.** `lib/feed/occurrences.ts#densityStep`
+maps a day's event count to `0 | 1 | 2 | 3` (none / one / two / three-or-more);
+`monthGrid` takes a `ReadonlyMap<string, number>` of day → count (was a
+`ReadonlySet<string>` of days that merely had something) and stamps
+`densityStep` alongside the existing `hasEvents` on each `CalendarDay`.
+`app/(app)/feed/month-grid.tsx` renders it as three small dots below the day
+number, decorative (`aria-hidden`) with the count in words on the day
+button's own accessible name instead (`countLabel`). `/feed`'s grid counts
+every scraped occurrence per day; `/calendar`'s counts committed occurrences
+only — same `byDay` groups each page already produces, no second read.
+
+**MiniCard gained what Card already had.** `app/(app)/calendar/calendar-view.tsx`'s
+`MiniCard` now shows the same "Where this came from" link as `Card`
+(`card.sourceUrl`, omitted when null) and a quiet "Your community" marker
+when `card.communityFocus` is true. `loadFeedData` (`app/(app)/feed/data.ts`)
+added `focus` to its existing `communities` select and to `FeedCard` as
+`communityFocus` — `communities.focus` already existed (spec 01/05: PRD
+§1.7's "one of my few current communities," user-owned, never written by
+discovery), so this is one more column on an existing join, not a new query
+or a new column.
+
+**Assessment Back navigation needed no new code.** The UI (`interview.tsx`'s
+Back/Forward, `editSpecFor` re-rendering an answered question) and the write
+path (`writeAnswer`'s idempotent upsert by `(run_id, question_id)`) already
+existed from spec 03 and spec 18. This spec's own contribution is test
+coverage that was missing: `tests/assessment-flow.test.ts` holds the pure
+flow logic an edit depends on (overwriting never duplicates a row, never
+double-counts progress, never changes `nextStep`'s answer), and
+`e2e/assessment.spec.ts` gained a real-browser case answering three
+questions, going back two, changing an answer, and confirming the change
+landed with no duplicate row.

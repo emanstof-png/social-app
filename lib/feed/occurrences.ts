@@ -310,8 +310,20 @@ export function groupByDay<T extends { startsAt: string }>(
 }
 
 /**
- * Only cards whose selection is committed (`planned` or `attended`) --
- * what /calendar shows, versus /feed's unfiltered set (spec 07 addendum:
+ * Whether a selection counts as an active commitment -- `planned` or
+ * `attended`. `skipped` (evaluated, didn't attend) and `removed` (spec 17
+ * item 2's soft delete) are both excluded here, in the one place that
+ * decides it, so a future status added to the enum has to be reasoned about
+ * once rather than at every call site that currently spells out the two
+ * labels itself.
+ */
+export function isActiveSelection(status: string | null | undefined): boolean {
+  return status === "planned" || status === "attended";
+}
+
+/**
+ * Only cards whose selection is committed (`isActiveSelection`) -- what
+ * /calendar shows, versus /feed's unfiltered set (spec 07 addendum:
  * calendar-and-community-fields, decision 1). A narrower filter on the same
  * join loadFeedData already produces, not a new query shape.
  */
@@ -319,13 +331,28 @@ export function committedOnly<T extends { selection: { status: string } | null }
   items: T[],
 ): T[] {
   return items.filter(
-    (item) =>
-      item.selection !== null &&
-      (item.selection.status === "planned" || item.selection.status === "attended"),
+    (item) => item.selection !== null && isActiveSelection(item.selection.status),
   );
 }
 
-export type CalendarDay = { date: string; inMonth: boolean; hasEvents: boolean };
+export type CalendarDay = {
+  date: string;
+  inMonth: boolean;
+  hasEvents: boolean;
+  /** The day's event count mapped to four visible steps (spec 17 item 3):
+   * 0 = none, 1 = one, 2 = two, 3 = three or more. Past three the exact
+   * count is not what the glance is for (spec's own drafting decision). */
+  densityStep: 0 | 1 | 2 | 3;
+};
+
+/** The count-to-step mapping `CalendarDay.densityStep` uses. Pure so it can
+ * be unit-tested apart from the grid it feeds. */
+export function densityStep(count: number): 0 | 1 | 2 | 3 {
+  if (count <= 0) return 0;
+  if (count === 1) return 1;
+  if (count === 2) return 2;
+  return 3;
+}
 
 function dayKey(date: Date): string {
   const y = date.getUTCFullYear();
@@ -335,15 +362,17 @@ function dayKey(date: Date): string {
 }
 
 /**
- * A pure calendar grid: weeks of `{ date, inMonth, hasEvents }`, Sunday-start,
- * no library. `month` is 1-12, matching the `?month=YYYY-MM` search param.
- * `hasEventsOn` is the set of "YYYY-MM-DD" keys `groupByDay` already
- * produced, so the grid never recomputes what counts as "has an event."
+ * A pure calendar grid: weeks of `{ date, inMonth, hasEvents, densityStep }`,
+ * Sunday-start, no library. `month` is 1-12, matching the `?month=YYYY-MM`
+ * search param. `eventCountOn` is "YYYY-MM-DD" -> that day's card count, from
+ * the same `byDay` groups `groupByDay` already produced (spec 17 item 3: a
+ * day's count feeds both `hasEvents` and its density step, so the grid never
+ * recomputes what counts as "has an event").
  */
 export function monthGrid(
   year: number,
   month: number,
-  hasEventsOn: ReadonlySet<string>,
+  eventCountOn: ReadonlyMap<string, number>,
 ): CalendarDay[][] {
   const firstOfMonth = new Date(Date.UTC(year, month - 1, 1));
   const startWeekday = firstOfMonth.getUTCDay(); // 0 = Sunday
@@ -360,10 +389,12 @@ export function monthGrid(
   for (let atMs = gridStart; atMs <= gridEnd; atMs += DAY_MS) {
     const date = new Date(atMs);
     const key = dayKey(date);
+    const count = eventCountOn.get(key) ?? 0;
     week.push({
       date: key,
       inMonth: date.getUTCMonth() === month - 1 && date.getUTCFullYear() === year,
-      hasEvents: hasEventsOn.has(key),
+      hasEvents: count > 0,
+      densityStep: densityStep(count),
     });
     if (week.length === 7) {
       weeks.push(week);

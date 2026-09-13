@@ -1,123 +1,142 @@
-# Review — spec 19 (loop-and-fixture-fixes)
+# REVIEW — spec 17 (first-fine-tuning-pass)
 
-Built by the loop from `docs/specs/19-loop-and-fixture-fixes.md` (no PRD
-coverage — loop tooling, like specs 13/14/15). This session resumed a spec
-already `In Progress`: an earlier session had applied item 1's originally
-prescribed fix (wrap `await use(context)` in `try`/`finally`, keep the
-manual tracing calls) and written a `NEEDS_HUMAN.md` when that fix turned
-out not to close the bug; that `NEEDS_HUMAN.md` and its GitHub issue (#12)
-were already resolved and deleted before this session started, with the
-spec file's own text updated in place to describe the actual fix. This
-session read that resolution note, applied the actual fix, and finished
-both items. Nothing High-tier was hit.
+Built by the loop from `docs/specs/17-first-fine-tuning-pass.md` (no
+addendum), starting from spec 16 (`spec-16`) per the spec's own opening
+paragraph. Five polish/correctness items on shipped behavior, no new
+capability — see `docs/specs/17-first-fine-tuning-pass.md`'s "Out of scope"
+for what was deliberately not touched.
 
 ## What was built
 
-- **Item 1, `e2e/fixtures.ts`.** Removed the manual
-  `context.tracing.start()`/`stop()` calls from the `context` fixture
-  entirely. Playwright's own `trace: "on-first-retry"` hook
-  (`playwright.config.ts`) already starts and stops tracing itself on any
-  newly-created `BrowserContext`, including one from
-  `chromium.launchPersistentContext` — the fixture's manual calls collided
-  with it on a retried attempt (`tracing.start: Tracing has been already
-  started`), which is what the spec's 2026-09-13 resolution note (and
-  GitHub issue #12) diagnosed as the real bug, superseding the spec's
-  original "wrap in `try`/`finally`, keep the manual calls" text. The
-  `try`/`finally` around `await use(context)` stays; the `finally` block
-  now only closes the context and removes its temp profile directory —
-  no more `testInfo.retry > 0` branch, since there is nothing left to
-  branch on.
-- **Item 2, `docs/agents/BUILDER.md`.** Added one paragraph, placed right
-  before the existing "If every scope item finishes..." paragraph, stating
-  that a builder session runs every verification command in the
-  foreground, awaited to completion in the same turn, and never
-  backgrounds one to wait for a notification — naming the spec 15
-  precedent (a builder backgrounded `npm run test:e2e`, waited on a
-  notification a one-shot `claude -p` session can never receive, and ended
-  without committing) as the reason.
-- Docs: `CHANGELOG.md` (one line), `docs/BUILD_PHASES.md`'s build-order
-  line (`→ 19 (pulled forward)`), `STATUS.md`'s top-of-file build-order
-  line and Next section (both resolved bullets — the fixture teardown bug
-  and the backgrounded-verification bug — removed), spec moved from In
-  Progress to Done.
+**Item 1 — assessment Back navigation.** No new application code was needed:
+the UI (`app/(app)/assessment/interview.tsx`'s Back/Forward buttons,
+`lib/assessments/flow.ts#editSpecFor`) and the write path
+(`writeAnswer`'s upsert, idempotent by `(run_id, question_id)`) already
+existed from spec 03 item 4 and spec 18 item 3. What this item actually
+added is the missing test coverage: `tests/assessment-flow.test.ts` (7
+tests) and a new case in `e2e/assessment.spec.ts`.
 
-Both items are Low tier per `CLAUDE.md`: item 1 is a one-file test-fixture
-change with no migration or server action; item 2 is docs only.
+**Item 2 — `unselectOccurrence` is a soft delete.** Migration 0020 adds
+`removed` to `selection_status`. `app/(app)/feed/actions.ts`'s
+`unselectOccurrence` now sets `status = 'removed'` and clears the four
+`gcal_*` columns instead of deleting the row (the Google Calendar entry is
+still genuinely deleted first). `selectOccurrence`'s upsert dropped
+`ignoreDuplicates: true` so re-Selecting a `removed` row flips it back to
+`planned` rather than being silently skipped. New
+`lib/feed/occurrences.ts#isActiveSelection` is the one shared predicate for
+"is this selection committed" — `committedOnly` and both `Card`'s and
+`MiniCard`'s `selected` flag all call it now. The button reads `Remove`;
+clicking it opens `ConfirmDialog` naming the event; dismissing runs nothing.
+
+**Item 3 — event density indicator.** New pure
+`lib/feed/occurrences.ts#densityStep` (count → 0-3 steps), unit-tested.
+`monthGrid` now takes a day→count map instead of a has-events set;
+`month-grid.tsx` renders three decorative dots plus an accessible name
+carrying the count in words.
+
+**Item 4 — `MiniCard` link and membership marker.** `MiniCard`
+(`app/(app)/calendar/calendar-view.tsx`) gained the same "Where this came
+from" link `Card` has, and a "Your community" marker from
+`communities.focus` (already existed, no new column). `loadFeedData` adds
+`focus` to its existing `communities` select.
+
+**Item 5 — tests and docs.** `docs/ARCHITECTURE.md` gained a "First
+fine-tuning pass (spec 17)" section; `CHANGELOG.md`, `STATUS.md` updated.
+`docs/CONVENTIONS.md#dialogs` already existed (spec 18), nothing to add.
+
+## Medium-tier flag
+
+Migration 0020 (`alter type ... add value 'removed'`) — applied live via
+`npm run migrate` per `loop.config.json`'s `haltBeforeMigration: false`,
+confirmed in sync via `migrate:status` both right after applying and again
+at the end of the session.
+
+## How to test this by hand
+
+1. `npm run dev` (or `next build && next start`), sign in, go to `/assessment`
+   on a fresh run.
+2. Answer the first three about-you questions (all free text). Click **Back**
+   twice — this lands on the second question, not the first, since two Back
+   clicks from wherever you are steps back two questions. Change that
+   answer, click **Save this answer**. You land back on the fourth question.
+   Confirm in Supabase (`assessment_answers`, filtered to your `run_id`) that
+   the second question's row shows the new answer and there is still exactly
+   one row for it.
+3. On the very first question, confirm **Back** is disabled/absent.
+4. Go to `/feed`, click **Select** on any card, confirm the button becomes
+   **Remove**. Click **Remove** — a dialog appears naming the event and
+   mentioning Google Calendar. Click **Cancel** (or the backdrop) — nothing
+   happens, the button still reads **Remove**. Click **Remove** again, then
+   confirm in the dialog — the card reverts to **Select**, and the
+   `selections` row (check via Supabase) now has `status = 'removed'`, not
+   deleted.
+5. Select that same occurrence again — it goes back to `planned` on the same
+   row (same `id`), not a new row.
+6. On `/feed` and `/calendar`, look at the month grid: a day with three or
+   more events shows three filled dots below its number; a day with one
+   event shows one; an empty day shows none. Hover/inspect the day button's
+   accessible name (e.g. via a screen reader or the accessibility tree) to
+   see "no events" / "one event" / "two events" / "three or more events."
+7. On `/calendar`, find a MiniCard for an event whose `source_url` is set —
+   confirm a "Where this came from" link appears and opens in a new tab. If
+   its community has `focus = true` (check `communities.focus`), confirm a
+   quiet "Your community" line appears; if `focus = false`, confirm nothing
+   is shown in its place.
 
 ## What I was unsure about
 
-Nothing — the spec's own 2026-09-13 resolution note fully specified the
-actual fix and the exact verification steps to run, since an earlier
-session had already done the diagnostic work and hit `NEEDS_HUMAN.md` once
-on this item.
-
-## Deviation from the spec's original text, and why
-
-Item 1's original "The fix" section (wrap in `try`/`finally`, keep the
-manual tracing calls unchanged) is not what this session built. The spec
-file itself was updated in place on 2026-09-13 (commit `1b05ded` and later
-`b1cd475`) to record that the original fix didn't close the bug and to
-specify the real one (remove the manual tracing calls). This session
-followed the spec's current text, not its original text — the spec's own
-resolution note explicitly asks `REVIEW.md` to say this plainly so a
-reviewer checking against the original wording doesn't flag the removed
-manual tracing calls as an unexplained, out-of-scope deviation.
-
-## How to test by hand
-
-There is no web route this spec touches (loop/test tooling, like specs
-13/14/15), so "verified" here means the actual commands were run and their
-real output read, not `next build` alone.
-
-1. `npm run build` (real production build, not `next dev`).
-2. Add a temporary test file anywhere under `e2e/` that imports from
-   `./fixtures` and deliberately fails (e.g. `expect(true).toBe(false)`
-   after a `page.goto("/")`).
-3. `npx playwright test <that file> --retries=1`.
-4. Confirm retry #1 fails on the deliberate assertion itself — no
-   `tracing.start: Tracing has been already started` error, no downstream
-   `TypeError` from a broken `admin` fixture.
-5. Confirm a real `trace.zip` was produced for the retried attempt (its
-   path is printed in the failure output, under `test-results/`).
-6. Delete the temporary test file.
-7. `npm run test:e2e` (full suite) — confirm the same pass count as spec
-   18's last clean run.
-
-## Verification actually performed
-
-- `npm run build` — passed (real production build).
-- A throwaway deliberately-failing test (`e2e/__throwaway-retry-test.spec.ts`,
-  deleted before committing — never part of any commit) run with
-  `npx playwright test e2e/__throwaway-retry-test.spec.ts --retries=1`
-  against a real `next start` server (Playwright's own `webServer` config).
-  Retry #1 failed cleanly on `expect(true).toBe(false)` with no
-  tracing-collision error, and produced a real
-  `test-results/__throwaway-retry-test-del-6e3bc--to-exercise-retry-teardown-chromium-retry1/trace.zip`,
-  confirmed present on disk (80,291 bytes) via `ls -la` after the run.
-- Full `npm run test:e2e` run afterward (throwaway file removed,
-  `test-results/` cleared first): **33 passed, 1 skipped** — the
-  pre-existing, already-documented `CRON_SECRET` cron-route gate under
-  Waiting on Eric. Same count as spec 18's last clean run; no regression.
-- `npm run lint`, `npm run typecheck`, and `npm run test` (662 unit tests,
-  4 pre-existing skips) all ran and passed as part of the pre-commit hook
-  on item 1's commit.
-
-This is the "real command run, real output read" verification path — there
-is no production-server-plus-authenticated-request path to exercise here,
-since neither item touches an app route.
-
-## Medium-tier flags
-
-None — no migration, no server action.
+- Item 1's acceptance criteria describe a "goes back two ... goes forward"
+  sequence. With three questions answered, two Back clicks from the live
+  (fourth) question land on the *second* question, not the first — each
+  Back click steps back one question from wherever you currently are, not
+  two total from the very start. I built and tested against that reading,
+  which matches the code's actual `goBack` behavior
+  (`interview.tsx`). "Goes forward" turned out to happen automatically:
+  saving an edited answer both writes it and returns you to the live
+  question, since there is nothing further to answer at an already-answered
+  question. I did not find this ambiguous enough to stop and ask, since the
+  spec's own acceptance criterion 1 only requires "the new answer being the
+  stored one ... with no duplicate row," which this reading and the actual
+  UI both satisfy regardless of exactly which earlier question ends up
+  edited.
+- An earlier run of this same session saw 2 failures in `e2e/people.spec.ts`
+  (a fixture-not-visible timeout), unrelated to this spec's scope
+  (contacts/CRM, nothing here touches it) — consistent with the
+  fixture-seeding-race flake class this file's Findings section already
+  tracks for `feed.spec.ts`. The full suite re-run recorded below (the one
+  that gates this commit) passed clean with no such failure, so nothing
+  further to flag here beyond what Findings already tracks.
 
 ## What the next spec needs
 
-Spec 17 (first-fine-tuning-pass) builds next per `STATUS.md`'s Next
-section; it is unaffected by this spec's two fixes and can proceed as
-drafted. Still open in `STATUS.md`'s Next section, unrelated to this spec:
-the `run-spec.sh` `setpgid` job-control warning from spec 15's build, and
-the shared-working-tree pre-commit-hook problem from spec 10's build —
-both remain candidates for their own future specs.
+- Spec 11 (weekly-planning-and-invites) is next in the queue, still in
+  Backlog — draft it first. `docs/specs/dojo-and-practice-layer-note.md`
+  should be read before drafting it, per this file's Backlog note.
+- The removed-items view and restore action spec 17 deliberately left out
+  (its own Out-of-scope note) is now trivially buildable with no migration,
+  since the `removed` status and its row already exist.
+- The `e2e/people.spec.ts` flake noted above is a candidate for the same
+  kind of standalone loop-tooling spec the `feed.spec.ts` FK-seeding race
+  already got queued as, if it recurs.
 
-Not pushed, per `loop.config.json`'s `push: false` — commits and the
-`spec-19` tag are local only.
+## Verification
+
+Both required paths were exercised, not just `next build`:
+
+- `npm run lint` / `npm run typecheck` / `npm test` (676 unit tests) — all
+  green.
+- `next build` — passed.
+- **A real production `next start` server, driven by real installed Chrome
+  (spec 15's fixture), served real authenticated requests** exercising both
+  of this spec's own acceptance-criteria features, as part of the full
+  `npm run test:e2e` suite (`next build && playwright test`) run in full
+  right before this commit: 35/36 passed, 1 pre-existing skip
+  (`cron-evaluation-prompts.spec.ts`'s `CRON_SECRET`-gated test), 0
+  failures — including the new Back-navigation e2e case
+  (`e2e/assessment.spec.ts:279`) and both new Remove-dialog cases
+  (`e2e/feed.spec.ts:266` confirms soft-delete; `:322` confirms dismiss
+  changes nothing and fires no `googleapis.com` request), plus the
+  previously-flaky `settings-push.spec.ts` real-GCM test, which also passed
+  clean this run.
+
+No CI-requiring acceptance criteria in this spec.

@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 
-import type { CalendarDay } from "@/lib/feed/occurrences";
+import { ConfirmDialog } from "../confirm-dialog";
+import { isActiveSelection, type CalendarDay } from "@/lib/feed/occurrences";
 import { retryGoogleSync, selectOccurrence, unselectOccurrence } from "./actions";
 import type { FeedCard } from "./data";
 import { MonthGrid } from "./month-grid";
@@ -90,14 +91,24 @@ export function FeedView({
 function Card({ card, timezone }: { card: FeedCard; timezone: string }) {
   const [result, setResult] = useState<ActionResult | null>(null);
   const [pending, startTransition] = useTransition();
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
 
-  const selected = card.selection !== null;
+  // A `removed` selection (spec 17 item 2) is not committed -- the card
+  // shows Select again, the same as one that was never selected at all.
+  const selected = card.selection !== null && isActiveSelection(card.selection.status);
 
-  function toggle() {
+  function select() {
     setResult(null);
     startTransition(async () => {
-      const action = selected ? unselectOccurrence : selectOccurrence;
-      setResult(await action(card.eventId, card.occurrenceAt));
+      setResult(await selectOccurrence(card.eventId, card.occurrenceAt));
+    });
+  }
+
+  function confirmRemove() {
+    setConfirmingRemove(false);
+    setResult(null);
+    startTransition(async () => {
+      setResult(await unselectOccurrence(card.eventId, card.occurrenceAt));
     });
   }
 
@@ -165,16 +176,30 @@ function Card({ card, timezone }: { card: FeedCard; timezone: string }) {
         ) : null}
       </div>
 
-      <div className="mt-1 flex items-center gap-2">
+      <div
+        className={`mt-1 flex items-center gap-2 ${
+          selected ? "rounded border border-foreground/30 bg-foreground/5 p-2" : ""
+        }`}
+      >
         <button
           type="button"
-          onClick={toggle}
+          onClick={selected ? () => setConfirmingRemove(true) : select}
           disabled={pending}
           className="rounded bg-foreground px-3 py-1.5 text-xs font-medium text-background disabled:opacity-50"
         >
-          {pending ? "Saving…" : selected ? "Added" : "Select"}
+          {pending ? "Saving…" : selected ? "Remove" : "Select"}
         </button>
       </div>
+
+      <ConfirmDialog
+        open={confirmingRemove}
+        onCancel={() => setConfirmingRemove(false)}
+        onConfirm={confirmRemove}
+        title="Remove this event?"
+        description={`"${card.title}" will no longer be on your plan, and its Google Calendar entry will also be deleted.`}
+        confirmLabel="Remove"
+        busy={pending}
+      />
 
       {/* Persistent, from the stored selection -- survives a reload, unlike
           the transient result below (spec 08 item 8). Null means never

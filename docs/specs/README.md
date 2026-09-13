@@ -61,6 +61,26 @@ build` passing is not enough, a production server must serve a real
 authenticated request exercising the feature, and `REVIEW.md` must state which
 of the two was done.
 
+**A criterion that requires CI, under `loop.config.json`'s `push: false`.**
+No build session ever pushes when `push` is `false` (`scripts/run-spec.sh`'s
+own push step is gated on that flag), and CI only runs on a push — so an
+acceptance criterion phrased as "the same in CI" or similar cannot be
+satisfied by any build session under the current config, no matter how the
+spec is written. This was found the hard way at spec 15's review gate
+(`docs/specs/15-review-fixes-addendum.md`). The resolution is not to avoid
+such criteria, since some fixes (spec 15's real-Chrome switch) genuinely
+need CI-specific confirmation (a different OS, a different Chrome install,
+a runner's own network policy) that a local run cannot stand in for.
+Instead: such a criterion is satisfied by **the manager's own post-review
+push** — `git push origin <branch> spec-NN`, per `docs/agents/MANAGER.md`'s
+"What you do" section, once the spec is tagged and reviewed clean — with
+the real CI result (job by job, not just the run's overall status; a
+skipped, `if:`-gated step still reports as part of a "successful" job)
+written into `REVIEW.md` or a review-fixes addendum afterward. A spec
+drafting a CI-requiring criterion should say so explicitly, so a reviewer
+does not flag it as unexpectedly unreachable the way spec 15's own gate
+did.
+
 **8. Out of scope.** Adjacent work explicitly deferred, and to which spec.
 
 Optional, where they apply: a default-models table for any new LLM component,

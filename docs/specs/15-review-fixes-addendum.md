@@ -98,6 +98,81 @@ stop-and-ask list both name secrets explicitly — so it is Eric's own
 action to take, not this addendum's or any build session's to do. See
 `STATUS.md`'s Waiting on Eric section, updated alongside this addendum.
 
+## Update, second push (2026-09-13): secrets restored, a real CI result at last
+
+Eric restored `NEXT_PUBLIC_SUPABASE_URL` and `ENCRYPTION_KEY` as GitHub
+repository secrets. A later, unrelated push (spec 16's drafted-spec
+commit, `b45d7ae`, docs-only — no code from spec 15 or this addendum
+changed) triggered CI run `34734619475` on commit `b45d7ae`, and this
+time the Playwright job's steps actually ran instead of skipping:
+
+- `lint, tsc, vitest` job: green (lint, typecheck, 635 unit tests).
+- `Check for Supabase secrets`: passed — all five secrets now present,
+  confirmed by every subsequent step actually executing rather than
+  being `if:`-skipped.
+- `Check for system Chrome`: passed, and its own log line reads
+  `Google Chrome 152.0.7977.82` — a real version, from the runner's
+  preinstalled branded Chrome, not a `playwright install chrome` step
+  (none exists after spec 15's change). **This satisfies the
+  `google-chrome --version printing a real version` half of spec 15's
+  CI acceptance criterion.**
+- `Build and run end-to-end tests`: **28 passed, 1 failed, 1 skipped.**
+  The 1 skipped is the pre-existing, already-documented cron
+  positive-path test (no `CRON_SECRET` set; unrelated to this spec). The
+  1 failed is `e2e/settings-push.spec.ts:89` — "enabling creates one row
+  for this browser; disabling deletes it" — which ran through both of
+  its configured retries (`Retry #1`, `Retry #2`, both visible in the
+  job log) and then failed outright on
+  `expect(page.getByText("Enabled on this device.")).toBeVisible({ timeout: 60_000 })`,
+  the real `pushManager.subscribe()` handshake not resolving in time.
+  Retry #1 additionally hit a harness-level `tracing.start: Tracing has
+  been already started` / `Cannot read properties of undefined (reading
+  'from')` error in `e2e/fixtures.ts`/the test's own `afterEach` — a
+  side effect of the retry itself re-entering a fixture that assumes a
+  single attempt, not a second, independent failure of the app or the
+  push path.
+- Overall job conclusion: **failure** (a real, non-skipped failure —
+  correctly reported as failure, unlike the first push's false-green
+  skip).
+
+**What this does and does not confirm.** This is the first genuine CI
+execution of `settings-push.spec.ts` under a real branded Chrome with
+secrets present — the exact confirmation spec 15's own criteria asked
+for, now finally observable. It confirms the retry mechanism itself
+works correctly in CI exactly as designed: two retries fired, and the
+test failed outright rather than being silently skipped, per spec 15's
+own "Decision: option 3" ("After all retries are exhausted the test
+fails, it does not skip"). It does **not** confirm the suite is green in
+CI — it is not, this run. This is a real instance of the exact risk
+spec 15's own Risks section named as **credible and not yet
+confirmed either way**: "a headless branded Chrome talking to Google's
+real push infrastructure from inside a CI runner is a genuinely
+different environment... it is credible that it behaves differently
+there even though the local fix is sound." That risk has now materialized
+once.
+
+**Neither CI-requiring acceptance criterion is closed out — one
+sub-part is confirmed, the rest is not:**
+
+- *"`google-chrome --version` printing a real version"* — **confirmed**,
+  this run.
+- *"...and the Playwright job green"* — **not confirmed**; the job is
+  red, for the reason above.
+- *"The same [retry ceiling] holds in CI"* — **partially confirmed**:
+  the retry ceiling genuinely fired in CI (2 attempts, visible in the
+  job log) and the fail-outright-not-skip behavior held. The "green"
+  half of that same criterion is not met.
+
+**This is not yet spec 15's own documented fallback trigger.** Its Risks
+section pre-committed to a specific threshold: "If CI shows this
+specific test failing after retries on three consecutive CI runs with no
+app-code change in between, convert it to a documented CI-only skip."
+This is the **first** CI run to reach this test at all (the prior run
+never got past the secrets-skip). One data point is not three
+consecutive ones — nothing is converted to a skip here, and no code
+changes. The next CI-triggering push is what would make this two of
+three, if it recurs.
+
 ## What is already built, do not rebuild
 
 - Everything under spec 15's own "What was built" section in `REVIEW.md`
@@ -187,10 +262,20 @@ actually answers the question.
 - `REVIEW.md` states the real CI run's result exactly as it was —
   including that the Playwright job's steps were skipped, not run, and
   why — rather than treating the run's overall green status as
-  sufficient.
+  sufficient. **Updated by the second-push section above: a later run
+  (`34734619475`) shows the real, non-skipped result — 28 passed, 1
+  failed, 1 skipped, the Chrome-version step confirmed — and that must
+  be transcribed into `REVIEW.md` too, not just the first run.**
 - `REVIEW.md` explicitly states the two CI-requiring acceptance criteria
   from `docs/specs/15-e2e-real-chrome.md` are **not yet satisfied**, and
-  why (missing repository secrets, unrelated to this spec's own code).
+  why. **As of the second push, the reason is no longer missing
+  secrets** — it is a real, once-observed instance of the exact risk
+  spec 15's own Risks section flagged as unconfirmed (a real GCM
+  handshake not completing in time, under a real branded Chrome, in CI
+  specifically). Still not satisfied; do not mark satisfied until a CI
+  run shows the suite actually green, or until three consecutive
+  failures trigger spec 15's own pre-committed fallback (a documented
+  CI-only skip) per its Risks section.
 - `STATUS.md`'s Waiting on Eric section names both missing secrets
   precisely, and the stale "CI is now fully green end to end" claim near
   the top of the file no longer stands unqualified.

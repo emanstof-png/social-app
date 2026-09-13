@@ -111,6 +111,25 @@ function unescapeText(value: string): string {
     .replace(/\\\\/g, "\\");
 }
 
+/**
+ * The events.description card summary (spec 16 item 2): collapsed to single
+ * spaces (a DESCRIPTION's own escaped newlines are real line breaks by the
+ * time this runs) and truncated to 280 characters at a word boundary rather
+ * than mid-word, since a feed card is not the place for a hard cut. Null for
+ * anything that trims to nothing.
+ */
+const DESCRIPTION_MAX_LENGTH = 280;
+
+function normalizeDescription(unescaped: string): string | null {
+  const collapsed = unescaped.trim().replace(/\s+/g, " ");
+  if (!collapsed) return null;
+  if (collapsed.length <= DESCRIPTION_MAX_LENGTH) return collapsed;
+
+  const cut = collapsed.slice(0, DESCRIPTION_MAX_LENGTH);
+  const lastSpace = cut.lastIndexOf(" ");
+  return lastSpace > 0 ? cut.slice(0, lastSpace) : cut;
+}
+
 // -- Date/time conversion ------------------------------------------------------
 
 /** The UTC offset, in minutes, of `timeZone` at approximately `atUtc`. */
@@ -253,7 +272,7 @@ function parseVevent(lines: string[], defaultTimeZone: string): ParsedIcsEvent |
     dtstart,
     dtend,
     location: locationProp ? unescapeText(locationProp.value) : null,
-    description: descriptionProp ? unescapeText(descriptionProp.value) : null,
+    description: descriptionProp ? normalizeDescription(unescapeText(descriptionProp.value)) : null,
     url: urlProp ? urlProp.value : null,
     rrule: rruleProp ? rruleProp.value : null,
   };

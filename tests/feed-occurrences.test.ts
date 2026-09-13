@@ -6,6 +6,7 @@ import {
   groupByDay,
   monthGrid,
   nearestDay,
+  parseMonthParam,
   parseRrule,
 } from "../lib/feed/occurrences";
 import { MAX_OCCURRENCES_PER_EVENT } from "../lib/feed/budget";
@@ -247,6 +248,38 @@ describe("committedOnly", () => {
 
   it("returns an empty array when nothing is committed", () => {
     expect(committedOnly([{ selection: null }])).toEqual([]);
+  });
+});
+
+describe("parseMonthParam", () => {
+  const now = new Date("2026-09-13T12:00:00Z");
+
+  it("parses a well-formed YYYY-MM param", () => {
+    expect(parseMonthParam("2026-11", now, "America/New_York")).toEqual({
+      year: 2026,
+      month: 11,
+    });
+  });
+
+  it("defaults to the current month in the given timezone when raw is undefined", () => {
+    expect(parseMonthParam(undefined, now, "America/New_York")).toEqual({
+      year: 2026,
+      month: 9,
+    });
+  });
+
+  it("defaults to the current month for a malformed param rather than throwing", () => {
+    expect(parseMonthParam("not-a-month", now, "America/New_York")).toEqual({
+      year: 2026,
+      month: 9,
+    });
+  });
+
+  it("rejects a month outside 1-12 and falls back to the current month", () => {
+    expect(parseMonthParam("2026-13", now, "America/New_York")).toEqual({
+      year: 2026,
+      month: 9,
+    });
   });
 });
 

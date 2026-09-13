@@ -25,7 +25,8 @@ type Db = SupabaseClient;
 
 const EVENT_COLUMNS =
   "id, dedupe_hash, title, starts_at, ends_at, location, address, cost, " +
-  "event_type, source_url, rsvp_url, recurrence, registration_required, capacity";
+  "event_type, source_url, rsvp_url, recurrence, registration_required, capacity, " +
+  "description";
 
 export async function readExistingEventsForCommunity(
   supabase: Db,

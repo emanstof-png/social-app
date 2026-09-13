@@ -3,25 +3,39 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 
+import type { CalendarDay } from "@/lib/feed/occurrences";
 import { retryGoogleSync, selectOccurrence, unselectOccurrence } from "./actions";
 import type { FeedCard } from "./data";
+import { MonthGrid } from "./month-grid";
 import { EVENT_TYPE_LABELS, dayLabel, type ActionResult } from "./view";
 
 /**
  * The Feed page (spec 07 item 5): a flat, chronological list of cards with
  * date dividers -- not grouped by activity, since every card already names
- * its own community.
+ * its own community. Spec 16 item 5 adds the month grid (shared with
+ * /calendar) above the list: its day markers use this same unfiltered
+ * `byDay`, so a scraped-but-unselected event still marks its day, and
+ * clicking a day scrolls/rings this list's own section -- the card list
+ * itself is untouched by which month the grid is showing.
  */
 
 export function FeedView({
   byDay,
   todayKey,
   timezone,
+  year,
+  month,
+  grid,
 }: {
   byDay: { day: string; items: FeedCard[] }[];
   todayKey: string;
   timezone: string;
+  year: number;
+  month: number;
+  grid: CalendarDay[][];
 }) {
+  const [activeDay, setActiveDay] = useState<string | null>(null);
+
   return (
     <div className="flex max-w-2xl flex-col gap-8">
       <header>
@@ -30,6 +44,16 @@ export function FeedView({
           Everything scraped from your communities&apos; calendars, soonest first.
         </p>
       </header>
+
+      <MonthGrid
+        year={year}
+        month={month}
+        grid={grid}
+        byDay={byDay}
+        monthHrefBase="/feed"
+        subject="scraped"
+        onDayResolved={setActiveDay}
+      />
 
       {byDay.length === 0 ? (
         <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm">
@@ -42,7 +66,13 @@ export function FeedView({
       ) : null}
 
       {byDay.map((group) => (
-        <section key={group.day} className="flex flex-col gap-3">
+        <section
+          key={group.day}
+          id={`day-${group.day}`}
+          className={`flex flex-col gap-3 ${
+            group.day === activeDay ? "-m-2 rounded-lg p-2 ring-2 ring-foreground/40" : ""
+          }`}
+        >
           <h2 className="border-b border-black/10 pb-1 text-sm font-medium opacity-70 dark:border-white/15">
             {dayLabel(group.day, todayKey)}
           </h2>
@@ -98,6 +128,10 @@ function Card({ card, timezone }: { card: FeedCard; timezone: string }) {
       <p className="text-xs opacity-70">
         {card.communityName} · {time}
       </p>
+
+      {card.description ? (
+        <p className="line-clamp-2 text-sm opacity-80">{card.description}</p>
+      ) : null}
 
       <dl className="flex flex-wrap gap-x-4 gap-y-1 text-xs opacity-70">
         {card.location ? (

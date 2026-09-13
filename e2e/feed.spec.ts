@@ -41,6 +41,9 @@ import { encryptSecret } from "../lib/llm/crypto";
 const FIXTURE_COMMUNITY_ID = "0e2e0000-0000-4000-8000-000000000001";
 const FIXTURE_EVENT_ID = "0e2e0000-0000-4000-8000-000000000002";
 const FIXTURE_TITLE = "[e2e] Fixture Feed Event";
+// A real seeded description (spec 16 item 4) -- FIXTURE_CUT_TITLE below is
+// seeded with none, so the two together cover both card states.
+const FIXTURE_DESCRIPTION = "A weekly gathering with live music and a beginner lesson.";
 
 // Same community as the base fixture: a weekly recurring event, so the
 // occurrence-independence test only has to vary the recurrence, not the
@@ -188,6 +191,7 @@ async function seedFixture(
       event_type: "community_event",
       dedupe_hash: "e2e-fixture-hash",
       status: "active",
+      description: FIXTURE_DESCRIPTION,
     },
     {
       id: FIXTURE_RECURRING_EVENT_ID,
@@ -581,5 +585,47 @@ test.describe("feed", () => {
     await page.getByRole("button", { name: `Day ${todayKey}` }).click();
     await expect(page.getByRole("status")).toContainText("Nothing committed");
     await expect(page.locator(`#${committedSectionId}`)).toBeInViewport();
+  });
+
+  test("a card's scraped description renders as a summary; a card with none renders no summary element (spec 16 item 4)", async ({
+    page,
+  }) => {
+    await expect(page.getByText(FIXTURE_TITLE)).toBeVisible({ timeout: 20_000 });
+
+    const describedCard = page.locator("article", { hasText: FIXTURE_TITLE });
+    await expect(describedCard.getByText(FIXTURE_DESCRIPTION)).toBeVisible();
+
+    // FIXTURE_CUT_TITLE's event is seeded with no description and no
+    // recurrence, so its card's only <p> is the community/time line -- a
+    // second <p> would mean a summary element rendered for a null
+    // description, which the spec says must not happen.
+    const undescribedCard = page.locator("article", { hasText: FIXTURE_CUT_TITLE });
+    await expect(undescribedCard.getByText(FIXTURE_DESCRIPTION)).toHaveCount(0);
+    await expect(undescribedCard.locator("p")).toHaveCount(1);
+  });
+
+  test("clicking a day on /feed scrolls to it when it has scraped events, or to the nearest day with events when not (spec 16 item 5)", async ({
+    page,
+  }) => {
+    await expect(page.getByText(FIXTURE_TITLE)).toBeVisible({ timeout: 20_000 });
+
+    const sectionId = await page
+      .locator("section", { hasText: FIXTURE_TITLE })
+      .first()
+      .getAttribute("id");
+    if (!sectionId) throw new Error("Could not find the fixture's day section id.");
+    const eventDate = sectionId.replace("day-", "");
+
+    // Exact match: clicking the fixture's own day scrolls it into view, no notice.
+    await page.getByRole("button", { name: `Day ${eventDate}` }).click();
+    await expect(page.locator(`#${sectionId}`)).toBeInViewport();
+    await expect(page.getByRole("status")).toHaveCount(0);
+
+    // The fixtures are all seeded a few days out, so "today" has nothing
+    // scraped -- the click must still produce something, not a no-op.
+    const todayKey = new Date().toISOString().slice(0, 10);
+    await page.getByRole("button", { name: `Day ${todayKey}` }).click();
+    await expect(page.getByRole("status")).toContainText("Nothing scraped");
+    await expect(page.locator(`#${sectionId}`)).toBeInViewport();
   });
 });

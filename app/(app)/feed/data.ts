@@ -55,6 +55,8 @@ export type FeedCard = {
   recurrence: string | null;
   sourceUrl: string | null;
   rsvpUrl: string | null;
+  /** The scrape-time summary (spec 16 item 1) -- never user-written. */
+  description: string | null;
   selection: SelectionRow | null;
 };
 
@@ -78,6 +80,7 @@ export type FeedSourceEvent = {
   rsvp_url: string | null;
   recurrence: string | null;
   status: string;
+  description: string | null;
 };
 
 /** All active events, oldest occurrence-source first (starts_at order). */
@@ -86,7 +89,7 @@ export async function readEvents(supabase: Db, userId: string): Promise<FeedSour
     .from("events")
     .select(
       "id, community_id, title, starts_at, ends_at, location, cost, event_type, " +
-        "source_url, rsvp_url, recurrence, status",
+        "source_url, rsvp_url, recurrence, status, description",
     )
     .eq("user_id", userId)
     .eq("status", "active")
@@ -109,6 +112,7 @@ export async function readEvents(supabase: Db, userId: string): Promise<FeedSour
         rsvp_url: true,
         recurrence: true,
         status: true,
+        description: true,
       })
       .parse(row),
   );
@@ -223,6 +227,7 @@ export async function loadFeedData(
         recurrence: event.recurrence,
         sourceUrl: event.source_url,
         rsvpUrl: event.rsvp_url,
+        description: event.description,
         selection:
           selectionsByKey.get(occurrenceKey(occurrence.eventId, occurrence.occurrenceAt)) ?? null,
       });

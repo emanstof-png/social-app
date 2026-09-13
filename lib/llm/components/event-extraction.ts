@@ -39,6 +39,7 @@ export const eventExtractionOutput = z.object({
         recurrence: z.string().nullable(),
         registration_required: z.boolean().nullable(),
         capacity: z.number().int().positive().nullable(),
+        description: z.string().nullable(),
       }),
     )
     .default([]),
@@ -86,6 +87,11 @@ export const eventExtractionComponent: ComponentDefinition<
       "null.",
     "- rsvp_url is a registration or ticket link if the page gives one for " +
       "that specific event, or null.",
+    "- description is one sentence, at most 280 characters, in the page's " +
+      "own words, saying what happens at the event and who it is for. Never " +
+      "invent one, and never just restate the title, time, cost or location " +
+      "-- those are already shown elsewhere. null when the page gives " +
+      "nothing beyond a title and a time.",
     "- Skip anything on the page that is not a dated event at all (a mission " +
       "statement, a membership pitch, a list of past events).",
   ].join("\n"),

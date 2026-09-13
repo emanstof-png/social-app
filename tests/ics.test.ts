@@ -147,6 +147,40 @@ describe("parseIcs", () => {
     expect(events[0].dtend).toBeNull();
   });
 
+  it("unescapes commas and newlines in DESCRIPTION and collapses the result to single spaces (spec 16 item 2)", () => {
+    const { events, skipped } = parseIcs(fixture("description-escaped.ics"), NY);
+
+    expect(skipped).toEqual([]);
+    expect(events).toHaveLength(1);
+    expect(events[0].description).toBe(
+      "Live music, a caller, and a beginner lesson. All levels welcome, no partner needed.",
+    );
+  });
+
+  it("truncates a DESCRIPTION over 280 characters at a word boundary (spec 16 item 2)", () => {
+    const { events, skipped } = parseIcs(fixture("description-long.ics"), NY);
+
+    expect(skipped).toEqual([]);
+    expect(events).toHaveLength(1);
+    const description = events[0].description;
+    expect(description).not.toBeNull();
+    expect(description!.length).toBeLessThanOrEqual(280);
+    // Cut at a word boundary, not mid-word: the source text has no comma
+    // near the cutoff, so a clean truncation ends without one.
+    expect(description!.endsWith(" ")).toBe(false);
+    expect(description).toBe(
+      "A full weekend of contras, squares and English country dancing with " +
+        "live music from three different bands and callers from across the " +
+        "region. Beginner workshops run all day Saturday before the evening " +
+        "dance, and there is a potluck lunch on Sunday where everyone brings a dish to",
+    );
+  });
+
+  it("is null when DESCRIPTION is absent", () => {
+    const { events } = parseIcs(fixture("malformed-amid-valid.ics"), NY);
+    expect(events[0].description).toBeNull();
+  });
+
   it("never expands RRULE, only captures it as raw text", () => {
     const ics = [
       "BEGIN:VCALENDAR",

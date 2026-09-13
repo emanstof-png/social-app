@@ -3,39 +3,20 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 
-import { nearestDay, type CalendarDay } from "@/lib/feed/occurrences";
+import type { CalendarDay } from "@/lib/feed/occurrences";
 import { retryGoogleSync, selectOccurrence, unselectOccurrence } from "../feed/actions";
 import type { FeedCard } from "../feed/data";
+import { MonthGrid } from "../feed/month-grid";
 import { EVENT_TYPE_LABELS, type ActionResult } from "../feed/view";
 
 /**
  * The Calendar page (spec 07 item 6, day-click behavior added by the spec 07
- * addendum: calendar-and-community-fields). A month grid plus a day-by-day
- * Upcoming list, `byDay` already filtered to committed selections only
- * (page.tsx). Clicking a day scrolls/highlights the Upcoming list -- it never
- * navigates, and it never silently no-ops even when the clicked day has
- * nothing committed (the addendum's decision 2).
+ * addendum: calendar-and-community-fields). A month grid (shared with /feed,
+ * spec 16 item 6) plus a day-by-day Upcoming list, `byDay` already filtered
+ * to committed selections only (page.tsx). Clicking a day scrolls/highlights
+ * the Upcoming list -- it never navigates, and it never silently no-ops even
+ * when the clicked day has nothing committed (the addendum's decision 2).
  */
-
-/** "YYYY-MM-DD" -> "Sep 8, 2026", for the empty-day notice. */
-function formatDayLabel(day: string): string {
-  const [y, m, d] = day.split("-").map(Number);
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(new Date(Date.UTC(y, m - 1, d)));
-}
-
-const WEEKDAY_HEADERS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
-
-function shiftMonth(year: number, month: number, delta: number): string {
-  const total = year * 12 + (month - 1) + delta;
-  const y = Math.floor(total / 12);
-  const m = (total % 12) + 1;
-  return `${y}-${String(m).padStart(2, "0")}`;
-}
 
 export function CalendarView({
   year,
@@ -50,95 +31,20 @@ export function CalendarView({
   byDay: { day: string; items: FeedCard[] }[];
   timezone: string;
 }) {
-  const monthLabel = new Intl.DateTimeFormat("en-US", {
-    month: "long",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(new Date(Date.UTC(year, month - 1, 1)));
-
   const [activeDay, setActiveDay] = useState<string | null>(null);
-  const [emptyNotice, setEmptyNotice] = useState<string | null>(null);
-
-  function handleDayClick(date: string) {
-    const exact = byDay.find((group) => group.day === date);
-    if (exact) {
-      setActiveDay(date);
-      setEmptyNotice(null);
-      document
-        .getElementById(`day-${date}`)
-        ?.scrollIntoView({ behavior: "smooth", block: "start" });
-      return;
-    }
-
-    const nearest = nearestDay(byDay, date);
-    if (!nearest) {
-      // Nothing committed anywhere this month -- there is nothing to scroll
-      // to, but the click still has to produce something (the addendum's
-      // "do not silently no-op").
-      setActiveDay(null);
-      setEmptyNotice(`Nothing committed on ${formatDayLabel(date)} yet.`);
-      return;
-    }
-
-    setActiveDay(nearest.day);
-    setEmptyNotice(
-      `Nothing committed on ${formatDayLabel(date)}. Showing the nearest day with something on it.`,
-    );
-    document
-      .getElementById(`day-${nearest.day}`)
-      ?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
 
   return (
     <div className="flex max-w-4xl flex-col gap-8 md:flex-row">
       <div className="flex-1">
-        <header className="mb-3 flex items-center justify-between gap-2">
-          <Link
-            href={`/calendar?month=${shiftMonth(year, month, -1)}`}
-            className="rounded border border-current px-2 py-1 text-xs"
-          >
-            ← Prev
-          </Link>
-          <h1 className="text-lg font-medium">{monthLabel}</h1>
-          <Link
-            href={`/calendar?month=${shiftMonth(year, month, 1)}`}
-            className="rounded border border-current px-2 py-1 text-xs"
-          >
-            Next →
-          </Link>
-        </header>
-
-        <div className="grid grid-cols-7 gap-1 text-center text-xs">
-          {WEEKDAY_HEADERS.map((label) => (
-            <div key={label} className="pb-1 opacity-60">
-              {label}
-            </div>
-          ))}
-          {grid.flat().map((day) => (
-            <button
-              key={day.date}
-              type="button"
-              aria-label={`Day ${day.date}`}
-              onClick={() => handleDayClick(day.date)}
-              className={`rounded border p-2 ${
-                day.inMonth
-                  ? "border-black/10 dark:border-white/15"
-                  : "border-transparent opacity-30"
-              } ${day.hasEvents ? "bg-foreground/10 font-medium" : ""}`}
-            >
-              {Number(day.date.slice(-2))}
-            </button>
-          ))}
-        </div>
-
-        {emptyNotice ? (
-          <p
-            role="status"
-            className="mt-3 rounded border border-black/10 p-2 text-xs opacity-80 dark:border-white/15"
-          >
-            {emptyNotice}
-          </p>
-        ) : null}
+        <MonthGrid
+          year={year}
+          month={month}
+          grid={grid}
+          byDay={byDay}
+          monthHrefBase="/calendar"
+          subject="committed"
+          onDayResolved={setActiveDay}
+        />
       </div>
 
       <div className="flex flex-1 flex-col gap-6">

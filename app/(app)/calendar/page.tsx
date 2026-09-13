@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { committedOnly, dayKeyIn, groupByDay, monthGrid } from "@/lib/feed/occurrences";
+import { committedOnly, groupByDay, monthGrid, parseMonthParam } from "@/lib/feed/occurrences";
 import { hasSelectedActivities } from "@/lib/onboarding";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { loadFeedData, readProfileForFeed } from "../feed/data";
@@ -79,20 +79,6 @@ export default async function CalendarPage({
       timezone={profile.timezone}
     />
   );
-}
-
-/** Defaults to the current month in the profile's timezone. */
-function parseMonthParam(
-  raw: string | undefined,
-  now: Date,
-  timezone: string,
-): { year: number; month: number } {
-  if (raw && /^\d{4}-\d{2}$/.test(raw)) {
-    const [y, m] = raw.split("-").map(Number);
-    if (m >= 1 && m <= 12) return { year: y, month: m };
-  }
-  const [y, m] = dayKeyIn(now, timezone).split("-").map(Number);
-  return { year: y, month: m };
 }
 
 function ErrorPanel({ cause }: { cause: unknown }) {

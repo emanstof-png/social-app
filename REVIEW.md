@@ -1,277 +1,175 @@
-# Review — spec 15 (e2e-real-chrome)
+# Review — spec 16 (feed-calendar-and-summaries)
 
-Built by the loop from `docs/specs/15-e2e-real-chrome.md` (no addendum; test
-infrastructure only, no PRD coverage, like specs 12a/13/14). All five scope
-items finished; nothing High-tier was hit in this session. This was a
-resumed session: items 1-4 and most of item 2's content (including the
-`endpoint`-shape assertion) were already committed by earlier sessions in
-this same spec, along with the `NEEDS_HUMAN.md`/GitHub issue #10 resolution
-(option 3, a bounded retry) written into the spec file itself. This
-session's own work was applying that resolution in code —
-`test.describe.configure({ retries: 2, timeout: 90_000 })` in
-`e2e/settings-push.spec.ts` — and doing the full live verification pass.
+Built by the loop from `docs/specs/16-feed-calendar-and-summaries.md` (no
+addendum; PRD §2.5). All seven scope items finished; nothing High-tier was
+hit in this session. One Medium-tier item (a new migration) was applied
+live, per `loop.config.json`'s `haltBeforeMigration: false`.
 
 ## What was built
 
-- `playwright.config.ts`: `channel: "chrome"` on the `chromium` project, so
-  the suite drives a real installed Google Chrome, not Playwright's bundled
-  open-source Chromium.
-- `e2e/fixtures.ts` (new): overrides the built-in `context`/`page` fixtures
-  with a fresh `chromium.launchPersistentContext` per test against a temp
-  `os.tmpdir()` profile directory, reproducing `trace: "on-first-retry"` by
-  hand (start unconditionally, save only on a retried attempt), and removing
-  the temp directory at teardown (wrapped in try/catch).
-- All eight existing spec files' import line changed from
-  `"@playwright/test"` to `"./fixtures"` (`cron-evaluation-prompts.spec.ts`
-  keeps its separate `request` import unchanged — it never launches a
-  browser).
-- `e2e/settings-push.spec.ts`: new assertion that the created row's
-  `endpoint` is a real GCM/FCM `https://` URL, not merely "no error was
-  thrown, and a row exists"; the subscribe-visibility timeout raised from
-  20s to 60s; and (this session) `test.describe.configure({ retries: 2,
-  timeout: 90_000 })` scoped to that file's own `describe` block only — the
-  resolution to `NEEDS_HUMAN.md`/GitHub issue #10 (option 3: a bounded
-  retry, not a skip, since the real `pushManager.subscribe()` GCM/FCM
-  handshake outside the app's own code sometimes doesn't resolve in 15-20s
-  even though `subscribeToPush` itself is correct).
-- `.github/workflows/ci.yml`: drops `npx playwright install --with-deps
-  chromium`, adds a `google-chrome --version` step immediately before
-  `next build` so a runner without system Chrome fails loudly there instead
-  of inside an oblique browser-launch error.
-- `docs/CONVENTIONS.md#tests` and `docs/ARCHITECTURE.md`'s "Evaluation and
-  push" section both record the fix. `CHANGELOG.md` gets one line.
+- **Migration 0018** (`supabase/migrations/0018_event_description.sql`):
+  `events.description`, nullable text. Applied live via `npm run migrate`
+  and confirmed via `npm run migrate:status` (0018 shows `local`/`remote`
+  both `"0018"`). No RLS change, no new index.
+- `lib/schemas/event.ts`: `description: z.string().nullable()` added to
+  `eventRow`, and to `eventInsert`'s `.partial()` list. New "events row
+  schema (spec 16 item 1)" describe block in `tests/schemas.test.ts`.
+- `lib/scraping/plan.ts`: `description` added to `EventCandidate`,
+  `ExistingEvent`, `EventExtractionResult`'s event shape,
+  `icsEventToCandidate`, `extractionEventToCandidate`, and `mergeEvents`'
+  `WRITABLE` set — a re-scrape backfills a pre-spec-16 row's description.
+  `lib/scraping/plan-server.ts`'s `EVENT_COLUMNS` gained the column.
+- `lib/scraping/ics.ts`: new private `normalizeDescription` — trims,
+  collapses whitespace to single spaces, truncates to 280 characters at a
+  word boundary — wired into the existing `DESCRIPTION` mapping. Two new
+  fixtures (`tests/fixtures/ics/description-escaped.ics`,
+  `description-long.ics`) and three new tests.
+- `lib/llm/components/event-extraction.ts`: `description: z.string().nullable()`
+  added to the output schema's event object, plus one new prompt rule (one
+  sentence, ≤280 characters, in the page's own words, never a restatement of
+  title/time/cost/location, null when the page gives nothing beyond a title
+  and a time). No new component, no new model call.
+- `app/(app)/feed/data.ts`: `FeedCard.description` and `FeedSourceEvent.description`,
+  read through `readEvents` and threaded through `loadFeedData`.
+- `app/(app)/feed/feed-view.tsx`: `Card` renders `card.description` under the
+  community/time line, `line-clamp-2`, muted body text, nothing at all (no
+  placeholder, no layout shift) when null.
+- `app/(app)/feed/month-grid.tsx` (new): the month grid, Prev/Next month
+  navigation, and click-to-scroll/notice behavior, moved out of
+  `calendar-view.tsx` — not reimplemented. It scrolls the resolved day's
+  section into view and reports which day was resolved via an
+  `onDayResolved` callback; it does not own the ring highlight itself, since
+  that section belongs to whichever page's own card list renders it.
+- `lib/feed/occurrences.ts`: `parseMonthParam` moved here from
+  `calendar/page.tsx` (now shared with `feed/page.tsx`), with 4 new tests in
+  `tests/feed-occurrences.test.ts`.
+- `app/(app)/feed/page.tsx`: now takes `?month=YYYY-MM`, computes the grid
+  from the feed's own unfiltered `byDay` set, passes `year`/`month`/`grid`
+  to `FeedView`.
+- `app/(app)/calendar/calendar-view.tsx` / `page.tsx`: now import `MonthGrid`
+  from `../feed/month-grid` and `parseMonthParam` from `lib/feed/occurrences`
+  instead of owning private copies. `committedOnly` filter, nav entry and
+  Upcoming list unchanged.
+- `e2e/feed.spec.ts`: `FIXTURE_DESCRIPTION` added to the existing seeded
+  event; two new tests (description rendering vs. no summary element for a
+  null description; `/feed` day-click scroll/notice, mirroring the existing
+  `/calendar` one).
+- Docs: `docs/ARCHITECTURE.md` (new "Feed calendar and event summaries (spec
+  16)" section, plus a `description` line on the `events` table entry),
+  `docs/BUILD_PHASES.md` (build-order note), `CHANGELOG.md`, `STATUS.md`.
 
-No app code touched, no migration, no new dependency.
+## Medium-tier flag
 
-## Tier
+**Migration 0018 was applied live in this session** (`npm run migrate`),
+per `loop.config.json`'s `haltBeforeMigration: false`. Confirmed via
+`npm run migrate:status` before re-running the e2e suite. The first e2e run
+(before the migration) failed loudly and correctly with "Could not find the
+'description' column of 'events' in the schema cache" rather than silently
+passing against stale schema — that failure is expected evidence the
+migration was genuinely needed, not a defect.
 
-All five items are Low tier per `CLAUDE.md` — test infra, config, docs, and
-a mechanical one-line-per-file import change. No Medium- or High-tier items,
-so no `loop.config.json` migration/haltBeforeMigration flag applies.
+## Decisions followed, not re-litigated
 
-## How to test this by hand
+- **Not a repeat of the reverted `01e859d` merge.** Read via `git show
+  --stat 01e859d` and the revert commits before starting, per the spec's own
+  instruction. The grid is shared; the two pages still differ by which card
+  set they hand it and by their own list rendering. Nothing was removed.
+- **`description` in `mergeEvents`' `WRITABLE` set knowingly** — a re-scrape
+  can overwrite it, acceptable since no user ever edits this field.
+- **Two independent 280-character guards** (ICS truncation / prompt
+  instruction, plus the UI's `line-clamp-2`) — not redundant, since a model
+  does not reliably obey a character count.
 
-1. `npm run test:e2e` — builds a production bundle and runs the full suite
-   against `next start`. Expect `29 passed, 1 skipped` (the skip is
-   `cron-evaluation-prompts.spec.ts`'s positive-path test, gated on a real
-   `CRON_SECRET` Eric hasn't set yet — unrelated to this spec, documented in
-   `STATUS.md`'s Waiting on Eric).
-2. `npx playwright test e2e/settings-push.spec.ts` twice in a row, back to
-   back — both must pass, proving the fresh-profile-per-test fixture
-   actually isolates state rather than passing once by accident.
-3. After either run, check `os.tmpdir()` (e.g. `echo $TMPDIR` on macOS) for
-   any directory starting with `gazelle-e2e-` — there should be none.
-4. To see the retry mechanism itself fire (not just trust that it's
-   configured): temporarily break the `endpoint` regex assertion in
-   `e2e/settings-push.spec.ts` to something that can never match, run
-   `npx playwright test e2e/settings-push.spec.ts --reporter=list`, and
-   watch it run "Retry #1" then "Retry #2" before failing outright — then
-   revert the change. (This is exactly what this session did to confirm the
-   behavior; see "What I verified" below.)
+## CONVENTIONS.md sections followed
 
-## What I verified live (not just `next build`)
+- `#page-layout` — no route-shape change; `month-grid.tsx` is a `"use client"`
+  component file, matching the existing per-component-file pattern.
+- `#directive-free-shared-modules` — `lib/feed/occurrences.ts` (where
+  `parseMonthParam` now lives) already carries no directive.
+- `#zod-row-schemas` — `eventRow`/`eventInsert` extended in one file;
+  `tests/schemas.test.ts`'s generic column-coverage check plus a new
+  realistic-row describe block.
+- `#migrations` — sequential `0018_event_description.sql`, one file, no RLS
+  change needed (ownership unchanged), no enum involved.
+- `#llm-components` — `event_extraction` extended in place, no new
+  `COMPONENT_REGISTRY`/`DEFAULT_MODEL_SETTINGS` entry needed since it is not
+  a new component.
+- `#tests` — red before green for `ics.test.ts`'s new cases and
+  `scraping-plan.test.ts`'s backfill test (confirmed failing before the
+  implementation change, in the course of building them).
+- `#docs-touched-by-every-spec` — `CHANGELOG.md`, `STATUS.md`,
+  `docs/BUILD_PHASES.md`, `docs/ARCHITECTURE.md` all updated.
 
-Both verification paths were exercised, per `CLAUDE.md`'s rule that
-`next build` passing is not "verified":
+## How to test by hand
 
-- `next build` succeeded (part of `npm run test:e2e`).
-- A real production server (`next start`, Playwright's own `webServer`
-  block) was exercised by every test in the suite, each driving a real
-  authenticated request through the actual pages the suite covers
-  (`/login`, `/assessment`, `/communities`, `/evaluations`, `/feed`,
-  `/calendar`, `/people`, `/settings`) via a real installed Chrome through
-  the new persistent-context fixture — not Playwright's bundled Chromium,
-  and not the dev server.
+1. `npm run build && npm run start` (or use the existing dev server).
+2. Sign in, scrape a community whose calendar page has real event
+   descriptions (or an ICS feed with `DESCRIPTION` properties) from
+   `/communities`.
+3. Visit `/feed`: a month grid now sits above the card list. Click a day
+   that has a marked event — the page scrolls to that day's section and
+   rings it. Click a day with nothing — a `role="status"` notice names both
+   the clicked day and the nearest day shown instead.
+4. On a card whose event has a description, confirm the summary line
+   renders under the community/time line, clamped to two lines. A card with
+   no description shows no summary line and no gap where one would be.
+5. Visit `/calendar` — confirm it still shows only `planned`/`attended`
+   events, its own month grid still works the same way, and the "Calendar"
+   nav entry is unchanged.
+6. Re-run the same community's scrape a second time from `/communities` —
+   confirm (via the Supabase table editor or `psql`) that a pre-existing
+   event's `description` is now backfilled and nothing else on that row
+   changed.
 
-Concretely, in this session:
-
-- Ran the full `npm run test:e2e` suite twice, fresh each time (temp
-  profile directories cleared between runs): both runs green, 29
-  passed / 1 skipped, including `settings-push.spec.ts`'s real-subscribe
-  test (13-34s each of the several times it ran, well under its own 90s
-  file-scoped timeout, no retry needed on any clean run).
-- Ran `npx playwright test e2e/settings-push.spec.ts` twice back to back on
-  its own: both passed.
-- Checked `os.tmpdir()` immediately after a clean full-suite run: zero
-  `gazelle-e2e-*` directories remained, both times.
-- Found and removed one stale `gazelle-e2e-*` directory before the first of
-  these clean runs — its mtime predated this session's own test runs by
-  ~36 minutes, consistent with a leftover from the earlier interrupted
-  builder session `STATUS.md` already records ("ended mid-verification
-  without committing"), not a leak from the current fixture code.
-- Deliberately broke the `endpoint` assertion (temporarily, reverted after)
-  to force a real failure, and confirmed with `--reporter=list` that the
-  test actually retries — output showed "Retry #2" before the test failed
-  outright, proving `test.describe.configure({ retries: 2 })` is really
-  wired up and that exhausting retries fails the test rather than skipping
-  it, matching the spec's Resolved decision exactly.
-- `npm run lint`, `npm run typecheck`, and `npm run test` (unit suite, 635
-  passed / 4 pre-existing skips) all pass clean on the final tree.
+Automated equivalent: `npx playwright test e2e/feed.spec.ts` (10/10) against
+a real `next start` server.
 
 ## What I was unsure about
 
-- **CI's own `google-chrome --version` step is not confirmed by a real CI
-  run in this session.** `loop.config.json`'s `push` is `false`, and this
-  session never pushes (per its own instructions) — so nothing was pushed
-  to trigger GitHub Actions. Locally, `channel: "chrome"` successfully
-  launched and drove every test against this machine's own installed
-  Chrome, confirming the config and fixture code path work end to end
-  against a real Chrome — but the spec's own Risks section already flags
-  that a headless branded Chrome completing real GCM registration
-  specifically inside a GitHub Actions runner (different outbound network
-  policy, IP reputation, headless-flag interactions with GCM's client
-  checks) is unconfirmed until an actual CI run happens. That remains true
-  after this session; it needs a real push (by Eric, since this session
-  doesn't push) to settle.
-- **One temp-profile leak observed only during the deliberate-failure
-  diagnostic**, not during any of the several clean suite/file runs: after
-  the retry-until-failure run (3 launched contexts: initial attempt + 2
-  retries), one `gazelle-e2e-*` directory remained afterward, even though
-  fixture teardown runs regardless of test outcome. The fixture's own
-  `fs.rm(...).catch(() => {})` swallows a failed removal silently rather
-  than retrying it, and the spec's own decisions section already
-  anticipated a closed Chrome profile can "briefly hold a lock file open."
-  This isn't a scope violation — the acceptance criterion is about a normal
-  full suite run, which was clean twice — but it means a CI runner that
-  accumulates a long history of real (not just deliberately forced) retry
-  failures could very slowly accumulate leftover profile directories rather
-  than reliably self-cleaning on every single attempt. Not fixed here since
-  it's outside this spec's scope (the acceptance criteria says nothing
-  about cleanup under a failing/retried run) and would be new,
-  undiscussed scope to add a removal retry loop. Worth a line in a future
-  spec's "what to watch" if it's ever actually observed accumulating in CI.
-
-## CI confirmation (added by the review-fixes addendum, 2026-09-13)
-
-This section resolves `REVIEW-FLAGS.md`'s one `blocking` finding from this
-spec's review gate: the two CI-requiring acceptance criteria in
-`docs/specs/15-e2e-real-chrome.md` (the Resolved-note bullet, "the same
-[retries] holds in CI", and the separate CI bullet, "a real CI run ... shows
-the new `google-chrome --version` step printing a real version ... and the
-Playwright job green") are structurally unreachable by any build session
-under `loop.config.json`'s `push: false` — no build session ever pushes, and
-CI only runs on a push. Per `docs/specs/15-review-fixes-addendum.md`, Eric
-decided directly that the manager would push `spec-15` once, from outside
-the normal loop config, and read the real result. This section transcribes
-what actually happened, across two real CI runs, honestly — neither closes
-the criteria out.
-
-**First push (2026-09-13): `git push origin main spec-15`.** Pushed commits
-`d315efa`..`9ab4561` and the `spec-15` tag, triggering GitHub Actions run
-`34730091495` on commit `a91456a`.
-
-- `lint, tsc, vitest` job: green (lint, typecheck, all 635 unit tests).
-- `Playwright (login flow)` job: reported green by GitHub's own UI, but
-  every actual step after `Check for Supabase secrets` — `actions/checkout`,
-  `actions/setup-node`, `Install dependencies`, `Check for system Chrome`
-  (this spec's own new step), and `Build and run end-to-end tests` — was
-  skipped, not run. A skipped, `if:`-gated step still counts toward a
-  "successful" job in GitHub's UI, which is why the run showed green even
-  though the thing the acceptance criteria actually need to see —
-  `google-chrome --version` printing a real version, and the suite passing
-  under a real Chrome in CI — never executed.
-- Reason, read directly from the job log: `SKIPPING Playwright: repository
-  secrets not set: NEXT_PUBLIC_SUPABASE_URL ENCRYPTION_KEY`. `gh secret
-  list` confirmed only three of the five secrets the workflow checks were
-  set at the time (`E2E_USER_ID`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
-  `SUPABASE_SERVICE_ROLE_KEY`); the other two were absent — a pre-existing,
-  upstream repository-configuration gap, unrelated to anything this spec's
-  own code built, and outside this addendum's authority to fix (secrets are
-  Eric's own action per `CLAUDE.md`'s Hard rules).
-- **Neither CI-requiring acceptance criterion was satisfied by this run.**
-
-**Second push (2026-09-13): secrets restored, a real result at last.** Eric
-restored `NEXT_PUBLIC_SUPABASE_URL` and `ENCRYPTION_KEY` as GitHub
-repository secrets. A later, unrelated push (spec 16's drafted-spec commit,
-`b45d7ae`, docs-only — no code from this spec or this addendum changed)
-triggered CI run `34734619475` on commit `b45d7ae`, and this time the
-Playwright job's steps actually ran instead of skipping:
-
-- `lint, tsc, vitest` job: green (lint, typecheck, 635 unit tests).
-- `Check for Supabase secrets`: passed — all five secrets now present,
-  confirmed by every subsequent step actually executing.
-- `Check for system Chrome`: passed, log line reads `Google Chrome
-  152.0.7977.82` — a real version, from the runner's preinstalled branded
-  Chrome (no `playwright install chrome` step exists after this spec's
-  change). **This satisfies the "`google-chrome --version` printing a real
-  version" half of the CI acceptance criterion.**
-- `Build and run end-to-end tests`: **28 passed, 1 failed, 1 skipped.** The
-  1 skipped is the pre-existing, already-documented `cron` positive-path
-  test (no `CRON_SECRET` set; unrelated to this spec). The 1 failed is
-  `e2e/settings-push.spec.ts:89` ("enabling creates one row for this
-  browser; disabling deletes it"), which ran through both of its configured
-  retries (`Retry #1`, `Retry #2`, both visible in the job log) and then
-  failed outright on `expect(page.getByText("Enabled on this
-  device.")).toBeVisible({ timeout: 60_000 })` — the real
-  `pushManager.subscribe()` handshake not resolving in time. `Retry #1`
-  additionally hit a harness-level `tracing.start: Tracing has been already
-  started` / `Cannot read properties of undefined (reading 'from')` error in
-  `e2e/fixtures.ts`/the test's own `afterEach` — a side effect of the retry
-  itself re-entering a fixture built for a single attempt, not a second,
-  independent failure of the app or the push path.
-- Overall job conclusion: **failure** — a real, non-skipped failure,
-  correctly reported as failure, unlike the first push's false-green skip.
-
-**What this does and does not confirm.** This is the first genuine CI
-execution of `settings-push.spec.ts` under a real branded Chrome with
-secrets present. It confirms the retry mechanism itself works correctly in
-CI exactly as designed: two retries fired, and the test failed outright
-rather than being silently skipped, per this spec's own "Decision: option
-3" ("After all retries are exhausted the test fails, it does not skip"). It
-does **not** confirm the suite is green in CI — it is not, this run. This is
-a real instance of the exact risk this spec's own Risks section named as
-credible and not yet confirmed either way: "a headless branded Chrome
-talking to Google's real push infrastructure from inside a CI runner is a
-genuinely different environment ... it is credible that it behaves
-differently there even though the local fix is sound." That risk has now
-materialized once.
-
-**Neither CI-requiring acceptance criterion is closed out — one sub-part is
-confirmed, the rest is not:**
-
-- *"`google-chrome --version` printing a real version"* — confirmed, this
-  run.
-- *"...and the Playwright job green"* — not confirmed; the job is red, for
-  the reason above.
-- *"The same [retry ceiling] holds in CI"* — partially confirmed: the
-  retry ceiling genuinely fired in CI (2 attempts, visible in the job log)
-  and the fail-outright-not-skip behavior held. The "green" half of that
-  same criterion is not met.
-
-**This is not yet this spec's own documented fallback trigger.** Its Risks
-section pre-committed to a specific threshold: "If CI shows this specific
-test failing after retries on three consecutive CI runs with no app-code
-change in between, convert it to a documented CI-only skip." This is the
-**first** CI run to reach this test at all (the prior run never got past the
-secrets-skip). One data point is not three consecutive ones — nothing is
-converted to a skip here, and no code changes. The next CI-triggering push
-is what would make this two of three, if it recurs.
-
-**Conclusion: both CI-requiring acceptance criteria remain open, not
-satisfied.** Not because of anything wrong with this spec's own code — the
-`channel: "chrome"` config and the `google-chrome --version` CI step both
-work exactly as designed — but because the real GCM handshake
-`settings-push.spec.ts` depends on did not complete in time under CI's
-network conditions, once. This will not be marked satisfied until a future
-CI run shows the suite actually green, or until three consecutive failures
-trigger the pre-committed fallback (a documented CI-only skip) per the
-Risks section. See `STATUS.md`'s Waiting on Eric section, updated alongside
-this addendum.
+- Whether the shared `MonthGrid` should own the ring-highlight styling
+  itself (via direct DOM manipulation) rather than reporting the resolved
+  day back to the caller. I chose the callback approach since it keeps
+  `MonthGrid` free of any assumption about how the caller's list is
+  rendered, and it exactly reproduces the existing calendar addendum's
+  scroll/notice behavior — moved, not reimplemented — while letting each
+  page style its own ring the way it already did. No test enforces the ring
+  class itself either before or after this change (only `toBeInViewport()`
+  and the `role="status"` text), so this was a judgment call within what
+  the acceptance criteria actually check.
+- Whether `/feed` genuinely needed its own `?month=` navigation (versus,
+  say, always defaulting to the current month with no Prev/Next). The spec
+  says the grid "moves onto" `/feed`, and `FEED_WINDOW_DAYS` (90 days) spans
+  about three months, so browsing months seemed necessary for the grid to
+  be useful over the full window the card list already shows — flagging
+  this inference here since the spec doesn't spell out month navigation
+  explicitly for `/feed`.
 
 ## What the next spec needs
 
 - Spec 11 (weekly-planning-and-invites) is next per `STATUS.md`'s Backlog —
-  read `docs/specs/dojo-and-practice-layer-note.md` before drafting it, per
-  the existing note there. Spec 16 (feed-calendar-and-summaries) is drafted
-  and queued ahead of it.
-- Any future e2e spec file should import `test`/`expect` from `./fixtures`,
-  not `@playwright/test` directly — now written into
-  `docs/CONVENTIONS.md#tests`.
-- `STATUS.md`'s Waiting on Eric list changed by this addendum: the missing
-  `NEXT_PUBLIC_SUPABASE_URL`/`ENCRYPTION_KEY` secrets are now restored (see
-  above), but the still-open question is whether `settings-push.spec.ts`'s
-  real-GCM-handshake test is reliably green in CI at all — the next
-  CI-triggering push is the next real data point toward that, or toward the
-  spec's own three-consecutive-failures fallback. `CRON_SECRET`, the Google
-  Cloud Console steps for spec 08, and the Vercel search-key verification
-  are all still open and unrelated to this spec.
+  draft it first, per `docs/specs/06-scheduled-jobs-addendum.md` for its
+  scheduled parts, and read `docs/specs/dojo-and-practice-layer-note.md`
+  before drafting (a sharper problem statement that may change what the
+  spec is for, flagged in Backlog).
+- The nine existing communities scraped before this spec still have null
+  `description` until re-scraped — a manual run, not a scope item here (spec's
+  own Out of scope).
+
+## Verification actually performed
+
+Both paths, not just `next build`:
+
+- `next build` passed; `npm run lint`, `npm run typecheck`, and `npm run test`
+  (647 unit tests, 4 pre-existing skips) all green.
+- A real production `next start` server, driven by a real installed Chrome
+  (spec 15's fixture), served real authenticated requests:
+  `npx playwright test e2e/feed.spec.ts` — 10/10 passed, including both new
+  spec 16 tests (description rendering, `/feed` day-click). Run once before
+  the migration (correctly failed with a real schema-cache error) and once
+  after (all green) — see the Medium-tier flag above.
+- The full `npm run test:e2e` suite run as a regression check: 31 passed, 1
+  skipped (the pre-existing, already-documented `CRON_SECRET` cron-route
+  gate under Waiting on Eric) — no new failures.
+
+Not pushed, per `loop.config.json`'s `push: false` — commits and the
+`spec-16` tag are local only.

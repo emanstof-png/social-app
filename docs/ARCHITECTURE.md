@@ -16,7 +16,7 @@
 - `communities` — name, activity_id, type (community_event | community_general | one_off_source), website, calendar_url, calendar_kind (ics | html | api | manual), location, cost, discovered_at, status (todo | went_once | returning | cut | archived), user_notes, genre_liked (bool null), focus (bool — "one of my few current communities"), and from spec 05: source_url, evidence (jsonb), discovery_run_id, why_relevant. Discovery writes the facts; the user owns status/focus/user_notes/genre_liked and discovery never writes those. From spec 06: calendar_kind_checked_at (nullable timestamptz) — when calendar-kind detection last ran, so an unreachable calendar is not re-probed on every page load. From the spec 07 calendar/community-fields addendum (migration 0014): times_visited (integer, not null, default 0) and rating (smallint 1-5, nullable) — both user-owned and manually editable on the Community card today; spec 09's evaluation flow will later write them automatically from real attendance.
 - `discovery_runs` — activity_id, location, status (running | complete | failed | empty), rounds_done, searches_used, pages_read, communities_found, empty_rounds, last_error, started_at, finished_at. One row per discovery run; a run advances one round per request, so this is also what makes an interrupted run resumable (spec 05).
 - `search_log` — provider (exa | tavily | serper), query, discovery_run_id, result_count, status, error_kind, error_message, latency_ms. One row per search API call, successful or not, so a fall-through is visible rather than inferred. Separate from `run_log` because a search call has no tokens, no cost and no output schema, and does have a query and a result count (spec 05).
-- `events` — community_id, title, starts_at, ends_at, location, address, cost, event_type (community_event | community_general | one_off), source_url, rsvp_url, recurrence, registration_required, capacity, scraped_at, dedupe_hash (unique).
+- `events` — community_id, title, starts_at, ends_at, location, address, cost, event_type (community_event | community_general | one_off), source_url, rsvp_url, recurrence, registration_required, capacity, scraped_at, dedupe_hash (unique). From spec 16 (migration 0018): description (nullable text) — a one-sentence scrape-time summary, never user-written; null when the source gives nothing beyond a title and a time.
 - `selections` — event_id, occurrence_at (spec 07: the specific dated instance selected, required on every row including a non-recurring event's, where it equals that event's own starts_at), selected_at, gcal_event_id, status (planned | attended | skipped). Unique on (user_id, event_id, occurrence_at), widened from (user_id, event_id) in migration 0012 so one recurring event can have more than one independently-selected occurrence. From spec 08 (migration 0015): gcal_sync_status/gcal_sync_error_kind/gcal_sync_error_message, reusing run_status/run_error_kind verbatim — null on all three means Google Calendar was never connected when this row was last written, not a failure.
 - `google_accounts` — one connected Google account per user (spec 08, migration 0015): email, access_token and refresh_token (ciphertext via encryptSecret, the same scheme provider_keys.key uses), token_expires_at. Deletable, not status-over-delete, same as provider_keys.
 - `evaluations` — event_id, attended, liked, connections_quality (1-5), culture_notes, ease_of_meeting (1-5), answered_at.
@@ -112,6 +112,43 @@ set. `/calendar` has no `data.ts` or `actions.ts` of its own: it imports
 since it is a second presentation over the same read and actions, not a
 second read path. Month navigation is a `?month=YYYY-MM` search param, not
 client state.
+
+## Feed calendar and event summaries (spec 16)
+
+**`events.description` is a scrape-time field, not a generated one** (migration
+0018). It rides the calls that already run per event, so the only new cost is
+output tokens on an existing model call, not a second one: `lib/scraping/ics.ts`
+maps a `VEVENT`'s `DESCRIPTION` (unescaped, collapsed to single spaces, trimmed,
+truncated to 280 characters at a word boundary, null when absent or empty), and
+`event_extraction`'s output schema gained a `description` field with one prompt
+rule — one sentence, at most 280 characters, in the page's own words, never a
+restatement of the title/time/cost/location the card already shows, null when
+the page gives nothing beyond a title and a time. `lib/scraping/plan.ts`'s
+`mergeEvents` writes it knowingly: it is in `WRITABLE`, so a re-scrape backfills
+it on rows written before this spec, at the cost that a re-scrape can overwrite
+it (acceptable, since no user ever edits this field, unlike
+`communities.user_notes`). The card clamps to two lines visually
+(`line-clamp-2`) in addition to the 280-character boundary, since a model does
+not reliably obey a character count.
+
+**The month grid moved into a shared component**, `app/(app)/feed/month-grid.tsx`
+— relocated from `calendar-view.tsx`, not reimplemented. It owns the grid,
+Prev/Next month navigation, and the click-to-scroll behavior (falling back to
+`nearestDay` with a `role="status"` notice, exactly as the spec 07 addendum
+built it); it does not own the ring highlight on the resolved day's own
+section, since that section belongs to whichever page's own card list is
+rendering it (`FeedView`'s or `CalendarView`'s) — `onDayResolved` reports which
+day to highlight and the caller applies the ring itself. `/feed` renders it
+above its unfiltered card list (day markers over every scraped event, Select
+still available on unselected ones) and now takes the same `?month=YYYY-MM`
+search param `/calendar` already did (`parseMonthParam`, moved to
+`lib/feed/occurrences.ts` since both pages need it); the card list itself is
+unaffected by which month the grid is showing, since it already renders the
+full `FEED_WINDOW_DAYS` window regardless. `/calendar` is unchanged apart from
+importing the grid: its own `committedOnly` filter, nav entry and Upcoming list
+all stay. This is explicitly not commit `01e859d` (reverted) again, which
+deleted `/calendar` and made `/feed` do both jobs — here the two pages differ
+only in which card set they hand the shared grid and their own list.
 
 ## Calendar and community fields addendum (spec 07 addendum)
 

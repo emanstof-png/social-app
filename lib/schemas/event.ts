@@ -22,6 +22,10 @@ export const eventRow = timestampedRowBase.extend({
   /** hash(community_id, title, starts_at); unique per user. */
   dedupe_hash: z.string().min(1),
   status: recordStatus,
+  /** A one-sentence summary from the scrape itself -- an ICS DESCRIPTION or
+   * event_extraction's own rule (spec 16 item 1) -- never user-written. Null
+   * when the source gives nothing beyond a title and a time. */
+  description: z.string().nullable(),
 });
 
 export const eventInsert = eventRow
@@ -38,6 +42,7 @@ export const eventInsert = eventRow
     capacity: true,
     scraped_at: true,
     status: true,
+    description: true,
   });
 
 export const eventUpdate = eventInsert.omit({ user_id: true }).partial();

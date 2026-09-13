@@ -375,6 +375,25 @@ export function monthGrid(
 }
 
 /**
+ * Parses the `?month=YYYY-MM` search param /feed and /calendar both take
+ * (spec 16 item 5 -- shared, since both pages now navigate the same month
+ * grid). Defaults to the current month in the given timezone when `raw` is
+ * missing or malformed.
+ */
+export function parseMonthParam(
+  raw: string | undefined,
+  now: Date,
+  timezone: string,
+): { year: number; month: number } {
+  if (raw && /^\d{4}-\d{2}$/.test(raw)) {
+    const [y, m] = raw.split("-").map(Number);
+    if (m >= 1 && m <= 12) return { year: y, month: m };
+  }
+  const [y, m] = dayKeyIn(now, timezone).split("-").map(Number);
+  return { year: y, month: m };
+}
+
+/**
  * The entry in `byDay` closest in calendar days to `target` ("YYYY-MM-DD"),
  * ties broken toward the earlier day. Null if `byDay` is empty.
  *

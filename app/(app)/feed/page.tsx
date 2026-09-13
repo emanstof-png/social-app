@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { dayKeyIn } from "@/lib/feed/occurrences";
+import { dayKeyIn, monthGrid, parseMonthParam } from "@/lib/feed/occurrences";
 import { hasSelectedActivities } from "@/lib/onboarding";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { loadFeedData, readProfileForFeed } from "./data";
@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
  * across every non-archived community -- not grouped by activity or gated
  * behind the current focus set (see the spec's drafting decisions).
  */
-export default async function FeedPage() {
+export default async function FeedPage({ searchParams }: PageProps<"/feed">) {
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
@@ -44,19 +44,32 @@ export default async function FeedPage() {
     );
   }
 
+  const now = new Date();
+  const params = await searchParams;
+  const monthParam = Array.isArray(params.month) ? params.month[0] : params.month;
+  const { year, month } = parseMonthParam(monthParam, now, profile.timezone);
+
   let data;
   try {
-    const now = new Date();
     data = await loadFeedData(supabase, user.id, { timezone: profile.timezone, now });
   } catch (cause) {
     return <ErrorPanel cause={cause} />;
   }
+
+  // The grid's day markers use the feed's own unfiltered set (spec 16 item
+  // 5) -- the same groupByDay result the card list already renders, not a
+  // second read or a re-derived "has an event" check.
+  const hasEventsOn = new Set(data.byDay.map((group) => group.day));
+  const grid = monthGrid(year, month, hasEventsOn);
 
   return (
     <FeedView
       byDay={data.byDay}
       todayKey={dayKeyIn(new Date(), profile.timezone)}
       timezone={profile.timezone}
+      year={year}
+      month={month}
+      grid={grid}
     />
   );
 }

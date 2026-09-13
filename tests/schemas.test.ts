@@ -779,6 +779,58 @@ describe("discovery and search schemas (spec 05 item 2)", () => {
   });
 });
 
+describe("events row schema (spec 16 item 1)", () => {
+  const base = {
+    id: "11111111-1111-4111-8111-111111111111",
+    user_id: "22222222-2222-4222-8222-222222222222",
+    created_at: "2026-09-06T10:00:00+00:00",
+    updated_at: "2026-09-06T10:00:00+00:00",
+  };
+
+  const event = {
+    ...base,
+    community_id: "33333333-3333-4333-8333-333333333333",
+    title: "Friday Contra Dance",
+    starts_at: "2026-09-11T19:30:00+00:00",
+    ends_at: "2026-09-11T22:30:00+00:00",
+    location: "American Legion Hall",
+    address: null,
+    cost: "$15",
+    event_type: "community_event",
+    source_url: "https://fridaynightdance.com/calendar",
+    rsvp_url: null,
+    recurrence: null,
+    registration_required: false,
+    capacity: null,
+    scraped_at: "2026-09-06T10:00:00+00:00",
+    dedupe_hash: "abc123",
+    status: "active",
+    description: "A weekly contra dance with live music and a caller.",
+  };
+
+  it("accepts a realistic event row carrying a description", () => {
+    expect(schemas.eventRow.parse(event).description).toBe(
+      "A weekly contra dance with live music and a caller.",
+    );
+  });
+
+  it("accepts a null description, for a source that gives nothing beyond a title and a time", () => {
+    expect(schemas.eventRow.parse({ ...event, description: null }).description).toBeNull();
+  });
+
+  it("does not require description on an event insert", () => {
+    const parsed = schemas.eventInsert.parse({
+      user_id: base.user_id,
+      community_id: event.community_id,
+      title: event.title,
+      starts_at: event.starts_at,
+      event_type: event.event_type,
+      dedupe_hash: event.dedupe_hash,
+    });
+    expect(parsed).not.toHaveProperty("description");
+  });
+});
+
 describe("insert schemas", () => {
   it("does not require database-generated columns", () => {
     const parsed = schemas.communityInsert.parse({

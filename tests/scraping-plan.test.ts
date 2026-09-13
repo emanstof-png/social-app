@@ -123,11 +123,12 @@ describe("scrapeCommunity", () => {
           recurrence: null,
           registration_required: null,
           capacity: null,
+          description: "A relaxed weekly social with no dance experience required.",
         },
       ],
     };
 
-    let capturedInsert: { source_url: string } | undefined;
+    let capturedInsert: { source_url: string; description: string | null } | undefined;
     const deps = makeDeps({
       // The fetch followed a redirect: the real page URL differs from the
       // community's stored calendar_url.
@@ -151,6 +152,11 @@ describe("scrapeCommunity", () => {
 
     expect(report.outcome).toBe("ok");
     expect(capturedInsert?.source_url).toBe("https://www.fridaynightdance.com/calendar/");
+    // Acceptance criterion 1 (spec 16): event_extraction's description
+    // reaches the write plan, not just the model's own output.
+    expect(capturedInsert?.description).toBe(
+      "A relaxed weekly social with no dance experience required.",
+    );
   });
 
   it("html: zero events found is reported as empty, not a failure", async () => {
@@ -318,11 +324,60 @@ describe("mergeEvents", () => {
       recurrence: null,
       registration_required: false,
       capacity: null,
+      description: null,
     };
 
     const plan = mergeEvents([], [candidate, candidate], "community-1");
 
     expect(plan.inserts).toHaveLength(1);
     expect(plan.droppedDuplicates).toBe(1);
+  });
+
+  it("backfills description on a re-scrape of a row written before spec 16, changing nothing else (spec 16 item 1)", () => {
+    const startsAt = "2026-09-11T19:30:00.000Z";
+    const existing: ExistingEvent = {
+      id: "event-1",
+      dedupe_hash: hashKeyFor("community-1", "Friday Contra Dance", startsAt),
+      title: "Friday Contra Dance",
+      starts_at: startsAt,
+      ends_at: null,
+      location: "American Legion Hall",
+      address: null,
+      cost: null,
+      event_type: "community_event",
+      source_url: "https://example.org/calendar",
+      rsvp_url: null,
+      recurrence: null,
+      registration_required: false,
+      capacity: null,
+      description: null,
+    };
+
+    const candidate = {
+      title: "Friday Contra Dance",
+      starts_at: startsAt,
+      ends_at: null,
+      location: "American Legion Hall",
+      address: null,
+      cost: null,
+      event_type: "community_event" as const,
+      source_url: "https://example.org/calendar",
+      rsvp_url: null,
+      recurrence: null,
+      registration_required: false,
+      capacity: null,
+      description: "Contras and squares with live music.",
+    };
+
+    const plan = mergeEvents([existing], [candidate], "community-1");
+
+    expect(plan.inserts).toHaveLength(0);
+    expect(plan.updates).toEqual([
+      {
+        id: "event-1",
+        title: "Friday Contra Dance",
+        changes: { description: "Contras and squares with live music." },
+      },
+    ]);
   });
 });

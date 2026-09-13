@@ -37,20 +37,22 @@ export const test = base.extend({
 
     await context.tracing.start({ screenshots: true, snapshots: true });
 
-    await use(context);
+    try {
+      await use(context);
+    } finally {
+      if (testInfo.retry > 0) {
+        const tracePath = testInfo.outputPath("trace.zip");
+        await context.tracing.stop({ path: tracePath });
+        await testInfo.attach("trace", { path: tracePath, contentType: "application/zip" });
+      } else {
+        await context.tracing.stop();
+      }
 
-    if (testInfo.retry > 0) {
-      const tracePath = testInfo.outputPath("trace.zip");
-      await context.tracing.stop({ path: tracePath });
-      await testInfo.attach("trace", { path: tracePath, contentType: "application/zip" });
-    } else {
-      await context.tracing.stop();
+      await context.close();
+      // A just-closed Chrome profile can briefly hold a lock file open --
+      // cleanup failing is not a reason to fail the test.
+      await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
     }
-
-    await context.close();
-    // A just-closed Chrome profile can briefly hold a lock file open --
-    // cleanup failing is not a reason to fail the test.
-    await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
   },
 
   page: async ({ context }, use) => {

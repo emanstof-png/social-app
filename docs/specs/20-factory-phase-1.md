@@ -167,6 +167,36 @@ actually hold; delete the throwaway spec and its worktree before committing.
 
 ### 2. AgentsView installed and usage-checked before each card
 
+**Found 2026-10-03 (manager), item paused:** the builder correctly stopped
+rather than guess — the spec named no install command, only
+agentsview.io, and an unattended session has no WebFetch/browser access to
+look it up, nor is `npx agentsview`/`agentsview` on the Bash allowlist. The
+manager looked it up (agentsview.io and its `/docs/mcp/` page):
+
+- Install: `curl -fsSL https://agentsview.io/install.sh | bash` (single Go
+  binary, macOS/Linux — matches this machine).
+- Session discovery is automatic: "a background server watches the session
+  directories your agents already write... it finds the default directories
+  automatically."
+- MCP registration (stdio, the documented safest default for a local
+  client): add to `.claude/settings.json`'s `mcpServers` —
+  `{"agentsview": {"command": "agentsview", "args": ["mcp"]}}` — or
+  `claude mcp add agentsview`. An HTTP alternative exists
+  (`agentsview mcp --http 8085`, loopback-bound) if stdio doesn't suit a
+  Vibe Kanban card's own process model; the builder decides which once item
+  1 is unblocked and the two are wired together.
+
+**Not resolved yet, still paused:** adding `Bash(curl -fsSL
+https://agentsview.io/install.sh*)` and `Bash(agentsview *)` to
+`.claude/settings.json`'s allowlist is the one remaining piece, and the
+manager's own attempt to add it was itself denied by this session's safety
+classifier as self-modification — a `curl | bash` pattern fetching and
+running an arbitrary remote script is exactly the kind of allowlist change
+that should get a human's own sign-off, not the manager's. Filed as
+`needs-eric` issue #20. **Builder: item 2 stays paused until #20 is
+answered; the install command and MCP config above are ready to use once
+the allowlist entry exists.**
+
 Install AgentsView locally (MIT, one local binary, per `docs/FACTORY.md`'s
 Off-the-shelf table) pointed at the local Claude Code session files (its own
 documented default location) and register its MCP endpoint in
@@ -279,24 +309,41 @@ gate is process tooling, not a deviation — Low/Medium per Decisions below).
 
 ### 4. Exception queue and machine-readable verdicts
 
-**`scripts/needs-human.ts` retired in favor of `scripts/needs-eric.ts`**
-(new): writes a GitHub issue labeled `needs-eric` only — no
-`NEEDS_HUMAN.md` file. `docs/FACTORY.md`'s own mapping table: "`CLAUDE.md`
-tier rule... Hard rules... verified means next start under auth" becomes
-"Closed escalation list; fence kept; CI required by branch protection;
-PRD-scope and secrets checks added as scripts; reviewer verdict written to a
-machine-readable file" — and separately, under Intent: "`NEEDS_HUMAN.md`
-replaced by issues." The loop's halt condition changes to match: a card
-(item 1) checks for an **open, unanswered** `needs-eric`-labeled issue
-instead of a `NEEDS_HUMAN.md` file (checked via `gh issue list --label
-needs-eric --state open --json`, not a file's existence — there is nothing
-local to check once the file is gone). `NEEDS_HUMAN.md` itself is deleted
-from the repo root if present and `scripts/needs-human.ts` deleted; every
-caller (`run-spec.sh`'s own `npm run needs-human --` calls, `docs/agents/
-PLANNER.md`/`BUILDER.md`'s references to it) is updated to call
-`needs-eric.ts` instead, with the same `--spec`/`--item`/`--needed`/`--did`
-flags (keeping the existing call shape means the planner/builder prompts
-only need their one invoking line changed, not their reasoning).
+**Corrected 2026-10-03 (manager), found by the builder as a real
+contradiction, not a guess either direction:** the paragraph below
+originally said every caller of `needs-human.ts`, including
+`scripts/run-spec.sh`'s own `npm run needs-human --` call sites, switches to
+`needs-eric.ts`, and separately that `needs-eric.ts` writes no
+`NEEDS_HUMAN.md` file at all. Those two can't both be true while
+`run-spec.sh` is still the active driver: it checks `[ -f NEEDS_HUMAN.md ]`
+as its own halt condition in three places, and item 1's own Decisions
+section says `run-spec.sh` is *not* rewired in this spec beyond the new
+`PAUSE`-file check. Resolved by splitting what changes now from what
+changes once `run-spec.sh` is actually retired (an unwritten later-phase
+item, per item 1's own fallback reasoning): see below.
+
+**`scripts/needs-eric.ts`** (new) replaces `scripts/needs-human.ts` as the
+thing every agent calls, but — while `run-spec.sh` is still the active
+driver — it keeps writing `NEEDS_HUMAN.md` in the same shape
+`needs-human.ts` always did, *in addition to* opening its GitHub issue with
+the `needs-eric` label instead of an unlabeled one. This is additive, the
+same pattern as item 1's `PAUSE`-file check: `run-spec.sh`'s three existing
+`[ -f NEEDS_HUMAN.md ]` checks keep working untouched, and every caller
+(`run-spec.sh`'s own `npm run needs-human --` call sites, `docs/agents/
+PLANNER.md`/`BUILDER.md`'s references) only needs its one invoking command
+renamed to `needs-eric.ts`, same flags. A **new** card-based halt path (item
+1, for once Vibe Kanban is actually driving — not `run-spec.sh`) checks for
+an open `needs-eric`-labeled issue instead of the file, since a worktree-
+per-card setup has no single shared `NEEDS_HUMAN.md` to check anyway. Full
+retirement of the `NEEDS_HUMAN.md` file — `docs/FACTORY.md`'s mapping table
+entry "`NEEDS_HUMAN.md` replaced by issues" taken literally — happens once
+`run-spec.sh` itself is retired, not in this spec; `docs/FACTORY.md`'s own
+Migration section already treats that swap as contingent on the Phase 1
+gate passing, so treating its downstream consequence (this file's removal)
+the same way is following the same document, not deviating from it.
+`scripts/needs-human.ts` itself is deleted now (replaced by `needs-eric.ts`,
+which is a strict superset of its behavior), only the standalone file output
+is kept.
 
 **The reviewer writes a machine-readable verdict file.** `docs/agents/
 REVIEWER.md` is amended (not replaced) so that, alongside its existing
@@ -537,8 +584,10 @@ other spec.
    a normal diff with neither passes it.
 5. `scripts/needs-eric.ts` opens a real `needs-eric`-labeled GitHub issue
    (test by deliberately triggering one on a throwaway branch, then closing
-   it); `NEEDS_HUMAN.md` and `scripts/needs-human.ts` no longer exist in the
-   repo; every caller references `needs-eric.ts` instead. A reviewer run
+   it) and still writes `NEEDS_HUMAN.md` in the same shape as before, so
+   `run-spec.sh`'s existing halt checks keep working unmodified;
+   `scripts/needs-human.ts` itself no longer exists in the repo; every
+   caller references `needs-eric.ts` instead. A reviewer run
    against a tagged spec writes both `REVIEW-FLAGS.md` and
    `REVIEW-VERDICT.json`, and the verdict's `pass`/`blocking` value matches
    whether `REVIEW-FLAGS.md` has a `blocking:` line.

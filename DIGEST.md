@@ -7,11 +7,11 @@ undrafted.
 
 **Shipped:** nothing yet this phase.
 
-**In progress:** spec 20 (Factory Phase 1 — Vibe Kanban, AgentsView,
-architect role, `needs-eric`/verdict file, digest/cleanup, spec 11 as the
-gate). Drafted, committed, pushed to `factory`. Loop running item 1
-(Vibe Kanban install) now, `maxItems: 1` so it checkpoints after each of the
-six scope items — expect several more loop runs before item 6's gate.
+**In progress:** spec 20 (Factory Phase 1). Item 1 (Vibe Kanban) halted once
+on a missing Bash allowlist entry — resolved (`.claude/settings.json`),
+loop restarted. `maxItems: 1` checkpoints after each of six scope items;
+expect several more loop runs before item 6's gate (spec 11 through the
+pipeline).
 
 **Waiting on Eric:** issue #13 "Branch protection on main" (`needs-eric`) —
 not blocking, can wait per its own body.

@@ -99,6 +99,24 @@ which is config the manager may edit directly per `docs/agents/MANAGER.md`.
 Added `"Bash(npx vibe-kanban*)"` to `.claude/settings.json`'s
 `permissions.allow` list. Resume this item.
 
+**Found 2026-10-03 (manager), item paused:** the allowlist fix above was not
+enough — `npx vibe-kanban` fails for a different reason, confirmed directly
+by the manager (not just by the builder's own report): its binary download
+from `https://npm-cdn.vibekanban.com` fails a TLS handshake consistently
+(`curl -v` to that exact host reproduces it; other HTTPS hosts, including
+another Cloudflare-fronted one, work fine from this machine, so it is not a
+general network/proxy problem). No alternate official source exists — BloopAI's
+GitHub Releases for this exact version only publish desktop installers and a
+web-frontend-only zip, not the standalone server binary the CLI expects.
+`docs/FACTORY.md`'s own fallback (Vibe Kanban display-only) does not route
+around this, since it still needs the same binary to launch at all. This is
+a genuine deviation-from-approved-architecture question, not a config gap —
+filed as `needs-eric` issue #16 (pick one: fix network access to that host,
+or approve dropping Vibe Kanban from Phase 1). **Builder: skip item 1 for
+now, build items 2-5 in whatever order the rest of this file allows, and
+return to item 1 once issue #16 is answered — item 6 (the gate) stays
+blocked on it either way.**
+
 Install Vibe Kanban locally (`npx vibe-kanban`, per `docs/FACTORY.md`'s
 Off-the-shelf table — open source, no signup, no budget impact) and point a
 project at this repo. Configure its worktree base at `../social-app-cells`

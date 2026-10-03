@@ -7,15 +7,16 @@ undrafted.
 
 **Shipped:** nothing yet this phase.
 
-**In progress:** spec 20 (Factory Phase 1). Item 1 (Vibe Kanban) hit a real
-blocker: its binary CDN (npm-cdn.vibekanban.com) fails TLS from this
-machine, confirmed by direct curl test; no alternate official source exists.
-Filed as issue #16, item 1 paused pending it, builder redirected to items
-2-5 while it's open. Item 6 (the gate) stays blocked until #16 is answered.
+**In progress:** spec 20 (Factory Phase 1). Item 1 (Vibe Kanban) paused on
+issue #16 (CDN TLS block, local to this network) — Eric answered "keep it,
+retry after hotspot install," no "installed" comment yet. Item 3 (architect
+role) paused on issue #18 — creating a new `.claude/agents/*.md` file is
+denied for unattended sessions by the harness itself, needs Eric in an
+interactive session. Building items 2, 4, 5 meanwhile; item 6 needs both.
 
-**Waiting on Eric:** issue #13 "Branch protection on main" (not blocking).
-Issue #16 "Vibe Kanban's binary CDN unreachable" (pick one: fix network
-access, or approve dropping Vibe Kanban from Phase 1) — blocks item 6.
+**Waiting on Eric:** #13 branch protection (not blocking). #16 Vibe Kanban
+CDN (blocks items 1, 6). #18 create `.claude/agents/architect.md` (blocks
+item 3, 6).
 
 **Decided without Eric:** `timeoutMinutes` 30→170, `maxItems` null→1 in
 `loop.config.json`, so one timeout can't lose a whole spec's work.

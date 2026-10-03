@@ -8,6 +8,7 @@
       "Bash(npx tsx *)",
       "Bash(npx vitest *)",
       "Bash(npx playwright *)",
+      "Bash(npx vibe-kanban*)",
       "Bash(git *)",
       "Edit",
       "Write"

@@ -89,6 +89,16 @@ of scope).
 
 ### 1. Vibe Kanban as board and runner
 
+**Resolved 2026-10-03 (manager):** the first build session's `NEEDS_HUMAN.md`
+found `npx vibe-kanban` refused by `.claude/settings.json`'s Bash allowlist
+(only `npx supabase/tsx/vitest/playwright *` were allowed). This is not a
+High-tier stop — `docs/FACTORY.md`'s Off-the-shelf table pre-approves Vibe
+Kanban by name, and the user's own session instructions say installing it
+"is not a High-tier escalation" — it was simply missing from the allowlist,
+which is config the manager may edit directly per `docs/agents/MANAGER.md`.
+Added `"Bash(npx vibe-kanban*)"` to `.claude/settings.json`'s
+`permissions.allow` list. Resume this item.
+
 Install Vibe Kanban locally (`npx vibe-kanban`, per `docs/FACTORY.md`'s
 Off-the-shelf table — open source, no signup, no budget impact) and point a
 project at this repo. Configure its worktree base at `../social-app-cells`
